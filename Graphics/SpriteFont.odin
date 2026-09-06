@@ -43,18 +43,25 @@ SpriteFontMake :: proc(font:^images.Font,size:f32=16,codepoints:[]int=nil)->Spri
 	if font==nil{return result}
 	scale:=images.FontGetScale(font,size)
 	result.Ascent=f32(font.Ascent)*scale; result.Descent=f32(font.Descent)*scale; result.LineGap=f32(font.LineGap)*scale; result.LineHeight=result.Ascent-result.Descent+result.LineGap
-	result.Image=new(images.Image); result.Image^=images.ImageMake(1024,1024); result.OwnsImage=true
+	result.Image=new(images.Image); result.Image^=images.ImageMake(2048,2048); result.OwnsImage=true
 	points:=codepoints;if len(points)==0 { ascii:=SpriteFontAscii(); points=ascii[:] }
 	x,y,row:=0,0,0
 	for cp in points {
 		ch:=images.FontGetCharacter(font,cp,scale); c:=SpriteFontCharacter{Codepoint=cp,Advance=ch.Advance,Offset=ch.Offset,Exists=true}
 		if ch.Visible && ch.Width>0 && ch.Height>0 {
 			if x+ch.Width+1>=result.Image.Width { x=0; y+=row+1; row=0 }
-			if y+ch.Height>=result.Image.Height { break }
-			bmp:=images.FontRasterize(font,cp,scale)
-			for py in 0..<ch.Height { for px in 0..<ch.Width { images.ImageSetPixel(result.Image,x+px,y+py,images.Color{255,255,255,bmp[py*ch.Width+px]}) } }
-			c.Subtexture=structs.Subtexture{Source=spatial.Rect{f32(x),f32(y),f32(ch.Width),f32(ch.Height)},Frame=spatial.Rect{-ch.Offset[0],-ch.Offset[1],f32(ch.Width),f32(ch.Height)}}
-			x+=ch.Width+1; if ch.Height>row {row=ch.Height}
+			// CPU 图集装不下时跳过该字形的位图(但保留字符注册): SpriteFontMakeGPU 会
+			// 用 Packer 重新栅格化, 不依赖这张图; 旧行为是 break, 会静默丢弃后续全部码点
+			if y+ch.Height<result.Image.Height {
+				bmp:=images.FontRasterize(font,cp,scale)
+				for py in 0..<ch.Height {
+					for px in 0..<ch.Width {
+						images.ImageSetPixel(result.Image,x+px,y+py,images.Color{255,255,255,bmp[py*ch.Width+px]})
+					}
+				}
+				c.Subtexture=structs.Subtexture{Source=spatial.Rect{f32(x),f32(y),f32(ch.Width),f32(ch.Height)},Frame=spatial.Rect{-ch.Offset[0],-ch.Offset[1],f32(ch.Width),f32(ch.Height)}}
+				x+=ch.Width+1; if ch.Height>row {row=ch.Height}
+			}
 		}
 		append(&result.Characters,c)
 	}
@@ -118,7 +125,7 @@ SpriteFontHeightOf :: proc(font:^SpriteFont,text:string,size:f32=0)->f32{if font
 SpriteFontSizeOf :: proc(font:^SpriteFont,text:string,size:f32=0)->spatial.Vec2{return spatial.Vec2{SpriteFontWidthOf(font,text,size),SpriteFontHeightOf(font,text,size)}}
 SpriteFontHeight :: proc(font:^SpriteFont)->f32{if font==nil{return 0};return font.Ascent-font.Descent}
 SpriteFontMeasure :: SpriteFontSizeOf
-sprite_font_draw_impl :: proc(batch:^Batcher,font:^SpriteFont,text:string,position,justify:spatial.Vec2,size:f32,color:runtime.Color){if batch==nil||font==nil{return};scale:=f32(1);if font.Size>0{scale=size/font.Size};BatcherPushMatrix2D(batch,position,spatial.Vec2{scale,scale},0,true);if font.HasMaterial{BatcherPushMaterial(batch,&font.Material)};BatcherPushSampler(batch,font.Sampler);at:=spatial.Vec2{0,font.Ascent};if justify[0]!=0{at[0]-=justify[0]*SpriteFontWidthOfLine(font,text,size)};if justify[1]!=0{at[1]-=justify[1]*SpriteFontHeightOf(font,text,size)};last:=0;for r in text{if sprite_font_is_newline(font,r){at[0]=0;at[1]+=font.LineHeight;last=0;continue};cp:=int(r);if c,ok:=SpriteFontFindCharacter(font,cp);ok{if last!=0{at[0]+=SpriteFontGetKerning(font,last,cp,size)};if c.Subtexture.Texture!=nil{BatcherImage(batch,c.Subtexture,spatial.Vec2{at[0]+c.Offset[0],at[1]+c.Offset[1]},color)};at[0]+=c.Advance};last=cp};BatcherPopSampler(batch);if font.HasMaterial{BatcherPopMaterial(batch)};BatcherPopMatrixStack(batch)}
+sprite_font_draw_impl :: proc(batch:^Batcher,font:^SpriteFont,text:string,position,justify:spatial.Vec2,size:f32,color:runtime.Color){if batch==nil||font==nil{return};scale:=f32(1);if font.Size>0{scale=size/font.Size};BatcherPushMatrix2D(batch,position,spatial.Vec2{scale,scale},0,true);if font.HasMaterial{BatcherPushMaterial(batch,&font.Material)};BatcherPushSampler(batch,font.Sampler);prev_texture:=batch.Texture;at:=spatial.Vec2{0,font.Ascent};just_scale:=f32(1);if font.Size>0&&size>0{just_scale=font.Size/size};if justify[0]!=0{at[0]-=justify[0]*SpriteFontWidthOfLine(font,text,size)*just_scale};if justify[1]!=0{at[1]-=justify[1]*SpriteFontHeightOf(font,text,size)*just_scale};last:=0;for r in text{if sprite_font_is_newline(font,r){at[0]=0;at[1]+=font.LineHeight;last=0;continue};cp:=int(r);if c,ok:=SpriteFontFindCharacter(font,cp);ok{if last!=0{at[0]+=SpriteFontGetKerning(font,last,cp,size)};if c.Subtexture.Texture!=nil{BatcherImage(batch,c.Subtexture,spatial.Vec2{at[0]+c.Offset[0],at[1]+c.Offset[1]},color)};at[0]+=c.Advance};last=cp};batch.Texture=prev_texture;BatcherPopSampler(batch);if font.HasMaterial{BatcherPopMaterial(batch)};BatcherPopMatrixStack(batch)}
 sprite_font_draw_simple :: proc(batch:^Batcher,font:^SpriteFont,text:string,position:spatial.Vec2,color:runtime.Color){sprite_font_draw_impl(batch,font,text,position,{},font.Size,color)}
 sprite_font_draw_sized :: proc(batch:^Batcher,font:^SpriteFont,text:string,position:spatial.Vec2,size:f32,color:runtime.Color){sprite_font_draw_impl(batch,font,text,position,{},size,color)}
 sprite_font_draw_justified :: proc(batch:^Batcher,font:^SpriteFont,text:string,position,justify:spatial.Vec2,color:runtime.Color){sprite_font_draw_impl(batch,font,text,position,justify,font.Size,color)}

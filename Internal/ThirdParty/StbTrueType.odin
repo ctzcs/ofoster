@@ -4,7 +4,7 @@ import "core:c"
 import stb "vendor:stb/truetype"
 
 StbFont :: struct { Info: stb.fontinfo, Data: [dynamic]u8, Valid: bool }
-StbFontInit :: proc(data: []u8) -> StbFont { f:=StbFont{}; for b in data { append(&f.Data,b) }; if len(f.Data)==0{return f}; result:=stb.InitFont(&f.Info,&f.Data[0],c.int(0)); f.Valid=bool(result); return f }
+StbFontInit :: proc(data: []u8) -> StbFont { f:=StbFont{}; for b in data { append(&f.Data,b) }; if len(f.Data)==0{return f }; offset := stb.GetFontOffsetForIndex(&f.Data[0], 0); if offset < 0 { offset = 0 }; result:=stb.InitFont(&f.Info,&f.Data[0],offset); f.Valid=bool(result); return f }
 StbFontScale :: proc(f:^StbFont,size:f32)->f32{if !f.Valid{return 0};return stb.ScaleForMappingEmToPixels(&f.Info,size)}
 StbFontMetrics :: proc(f:^StbFont)->(int,int,int){if !f.Valid{return 0,0,0};a,d,g:c.int=0,0,0;stb.GetFontVMetrics(&f.Info,&a,&d,&g);return int(a),int(d),int(g)}
 StbFontGlyph :: proc(f:^StbFont,codepoint:int)->int{if !f.Valid{return 0};return int(stb.FindGlyphIndex(&f.Info,rune(codepoint)))}
