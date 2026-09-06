@@ -502,6 +502,9 @@ resolve_drawable_target :: proc(graphics_device: ^GraphicsDevice, target: Drawab
 drawable_target_backing_target :: proc(graphics_device: ^GraphicsDevice, target: DrawableTarget) -> (^Target, Point2) {
 	resolved := resolve_drawable_target(graphics_device, target)
 	if resolved.IsWindow {
+		if graphics_device != nil && graphics_device.HasWindowRenderTarget {
+			return &graphics_device.WindowRenderTarget, Point2{int(graphics_device.SwapchainWidth), int(graphics_device.SwapchainHeight)}
+		}
 		if graphics_device == nil || !graphics_device.HasBackbufferTarget {
 			return nil, {}
 		}

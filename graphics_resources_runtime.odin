@@ -43,12 +43,50 @@ graphics_device_upload_to_buffer :: proc(graphics_device: ^GraphicsDevice, buffe
 
 	device := graphics_device.Device
 
-	transfer_size := u32(256) + data_size
-	transfer_info := SDL.GPUTransferBufferCreateInfo{
-		usage = .UPLOAD,
-		size = transfer_size,
-		props = 0,
+	// 帧内快速路径: 把上传记录进本帧命令缓冲的暂存缓冲分区 (免每帧创建/销毁与 GPU 空等)
+	if graphics_device.CommandBuffer != nil && graphics_device.RenderPass == nil {
+		cursor := graphics_device.UploadStagingCursor
+		required := data_size
+		need_total := cursor + required
+		if graphics_device.UploadStaging == nil || graphics_device.UploadStagingSize < need_total {
+			if graphics_device.UploadStaging != nil {
+				SDL.ReleaseGPUTransferBuffer(device, graphics_device.UploadStaging)
+				graphics_device.UploadStaging = nil
+			}
+			next := graphics_device.UploadStagingSize
+			if next <= 0 do next = 1 << 20
+			for next < need_total do next *= 2
+			transfer_info := SDL.GPUTransferBufferCreateInfo{usage = .UPLOAD, size = next, props = 0}
+			transfer := SDL.CreateGPUTransferBuffer(device, transfer_info)
+			if transfer == nil {
+				panic(create_error_from_sdl("SDL_CreateGPUTransferBuffer"))
+			}
+			graphics_device.UploadStaging = transfer
+			graphics_device.UploadStagingSize = next
+		}
+		transfer := graphics_device.UploadStaging
+		mapped := SDL.MapGPUTransferBuffer(device, transfer, false)
+		if mapped == nil {
+			panic(create_error_from_sdl("SDL_MapGPUTransferBuffer"))
+		}
+		dst := ([^]byte)(mapped)
+		mem.copy(raw_data(dst[cursor:int(cursor)+int(required)]), data, int(data_size))
+		SDL.UnmapGPUTransferBuffer(device, transfer)
+		copy_pass := SDL.BeginGPUCopyPass(graphics_device.CommandBuffer)
+		if copy_pass == nil {
+			return
+		}
+		upload_src := SDL.GPUTransferBufferLocation{transfer_buffer = transfer, offset = cursor}
+		upload_dst := SDL.GPUBufferRegion{buffer = buffer, offset = dest_offset, size = data_size}
+		SDL.UploadToGPUBuffer(copy_pass, upload_src, upload_dst, false)
+		SDL.EndGPUCopyPass(copy_pass)
+		graphics_device.UploadStagingCursor = cursor + required
+		return
 	}
+
+	// 帧外回退路径: 独立命令缓冲 + 上传后等待完成
+	transfer_size := u32(256) + data_size
+	transfer_info := SDL.GPUTransferBufferCreateInfo{usage = .UPLOAD, size = transfer_size, props = 0}
 	transfer := SDL.CreateGPUTransferBuffer(device, transfer_info)
 	if transfer == nil {
 		panic(create_error_from_sdl("SDL_CreateGPUTransferBuffer"))

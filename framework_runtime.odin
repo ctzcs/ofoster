@@ -164,6 +164,11 @@ GraphicsDevice :: struct {
 	HasRenderPassScissor: bool,
 	SamplerCache: map[TextureSampler]^SDL.GPUSampler,
 	PipelineCache: map[u64]^SDL.GPUGraphicsPipeline,
+	UploadStaging: ^SDL.GPUTransferBuffer,
+	UploadStagingSize: u32,
+	UploadStagingCursor: u32,
+	WindowRenderTarget: Target,
+	HasWindowRenderTarget: bool,
 	BackbufferTarget: Target,
 	BackbufferSize: Point2,
 	HasBackbufferTarget: bool,
@@ -296,19 +301,32 @@ startup_graphics_device :: proc(graphics_device: ^GraphicsDevice, window: ^SDL.W
 	graphics_device.SupportsMailbox = SDL.WindowSupportsGPUPresentMode(graphics_device.Device, window, .MAILBOX)
 	_ = SDL.SetGPUAllowedFramesInFlight(graphics_device.Device, 2)
 	present_mode := SDL.GPUPresentMode.VSYNC
-	if graphics_device.SupportsMailbox {
+	// MAILBOX 在部分 D3D12 驱动上存在资源增长问题, 默认使用 VSYNC
+	if false && graphics_device.SupportsMailbox {
 		present_mode = .MAILBOX
 	}
 	_ = SDL.SetGPUSwapchainParameters(graphics_device.Device, window, .SDR, present_mode)
 	graphics_device.SwapchainFormat = SDL.GetGPUSwapchainTextureFormat(graphics_device.Device, window)
-	backbuffer_size := window_size_in_pixels(&Window{Handle = window})
-	graphics_device_ensure_backbuffer(graphics_device, backbuffer_size, true)
+
+	// 窗口渲染目标: 包装每帧获取的 swapchain 纹理, 渲染直通无 blit
+	graphics_device.WindowRenderTarget = Target{}
+	graphics_device.WindowRenderTarget.GraphicsDevice = graphics_device
+	graphics_device.WindowRenderTarget.Name = "WindowSwapchain"
+	append(&graphics_device.WindowRenderTarget.Attachments, Texture{GraphicsDevice = graphics_device, Format = .Color})
+	graphics_device.HasWindowRenderTarget = true
+
 	default_resources_init(graphics_device)
 }
 
 shutdown_graphics_device :: proc(graphics_device: ^GraphicsDevice) {
 	if graphics_device.Device != nil && graphics_device.Window != nil {
 		_ = SDL.WaitForGPUIdle(graphics_device.Device)
+		if graphics_device.UploadStaging != nil {
+			SDL.ReleaseGPUTransferBuffer(graphics_device.Device, graphics_device.UploadStaging)
+			graphics_device.UploadStaging = nil
+			graphics_device.UploadStagingSize = 0
+			graphics_device.UploadStagingCursor = 0
+		}
 		graphics_device_dispose_backbuffer(graphics_device)
 		graphics_device_dispose_caches(graphics_device)
 		graphics_device_dispose_debug_draw(graphics_device)
@@ -351,6 +369,24 @@ begin_frame :: proc(graphics_device: ^GraphicsDevice) -> bool {
 	graphics_device.RenderPassIndexBuffer = nil
 	graphics_device.HasRenderPassViewport = false
 	graphics_device.HasRenderPassScissor = false
+	graphics_device.UploadStagingCursor = 0
+
+	// 提前获取 swapchain 纹理: 窗口渲染目标直接渲染到交换链 (无中间 blit)
+	swapchain_texture: ^SDL.GPUTexture
+	width, height: u32
+	if !SDL.WaitAndAcquireGPUSwapchainTexture(command_buffer, graphics_device.Window, &swapchain_texture, &width, &height) {
+		graphics_device.InFrame = false
+		return false
+	}
+	graphics_device.SwapchainTexture = swapchain_texture
+	graphics_device.SwapchainWidth = width
+	graphics_device.SwapchainHeight = height
+	if graphics_device.HasWindowRenderTarget {
+		graphics_device.WindowRenderTarget.Attachments[0].Resource = swapchain_texture
+		graphics_device.WindowRenderTarget.Width = int(width)
+		graphics_device.WindowRenderTarget.Height = int(height)
+		graphics_device.WindowRenderTarget.Bounds = RectInt{0, 0, int(width), int(height)}
+	}
 	return true
 }
 
@@ -359,58 +395,8 @@ end_frame :: proc(graphics_device: ^GraphicsDevice) {
 		return
 	}
 
-	render_pass := graphics_device.RenderPass
+	// 渲染已直接写入 swapchain 纹理: 无需 acquire / blit
 	command_buffer := graphics_device.CommandBuffer
-
-	if render_pass != nil {
-		SDL.EndGPURenderPass(render_pass)
-	}
-
-	swapchain_texture: ^SDL.GPUTexture
-	width, height: u32
-	if !SDL.WaitAndAcquireGPUSwapchainTexture(command_buffer, graphics_device.Window, &swapchain_texture, &width, &height) {
-		_ = SDL.CancelGPUCommandBuffer(command_buffer)
-		panic(create_error_from_sdl("SDL_WaitAndAcquireGPUSwapchainTexture"))
-	}
-	graphics_device.SwapchainTexture = swapchain_texture
-	graphics_device.SwapchainWidth = width
-	graphics_device.SwapchainHeight = height
-	if swapchain_texture != nil && width > 0 && height > 0 && graphics_device.HasBackbufferTarget {
-		source := target_attachment(&graphics_device.BackbufferTarget)
-		source_texture := texture_sample_resource(source)
-		if source_texture != nil && graphics_device.BackbufferSize.X > 0 && graphics_device.BackbufferSize.Y > 0 {
-			blit := SDL.GPUBlitInfo{
-				source = SDL.GPUBlitRegion{
-					texture = source_texture,
-					mip_level = 0,
-					layer_or_depth_plane = 0,
-					x = 0,
-					y = 0,
-					w = u32(Min(int(width), graphics_device.BackbufferSize.X)),
-					h = u32(Min(int(height), graphics_device.BackbufferSize.Y)),
-				},
-				destination = SDL.GPUBlitRegion{
-					texture = swapchain_texture,
-					mip_level = 0,
-					layer_or_depth_plane = 0,
-					x = 0,
-					y = 0,
-					w = u32(Min(int(width), graphics_device.BackbufferSize.X)),
-					h = u32(Min(int(height), graphics_device.BackbufferSize.Y)),
-				},
-				load_op = .DONT_CARE,
-				clear_color = graphics_device.ClearColor,
-				flip_mode = .NONE,
-				filter = .NEAREST,
-				cycle = false,
-			}
-			SDL.BlitGPUTexture(command_buffer, blit)
-		}
-	}
-	if width > 0 && height > 0 {
-		graphics_device_ensure_backbuffer(graphics_device, Point2{int(width), int(height)}, false)
-	}
-
 	graphics_device.RenderPass = nil
 	graphics_device.CommandBuffer = nil
 	graphics_device.SwapchainTexture = nil
@@ -467,6 +453,7 @@ graphics_device_ensure_backbuffer :: proc(graphics_device: ^GraphicsDevice, size
 	}
 	target := &graphics_device.BackbufferTarget
 	if target.Width < size.X || target.Height < size.Y {
+		fmt.println("[bb] recreating backbuffer:", size, " old:", target.Width, "x", target.Height)
 		target_dispose(target)
 		specs := [1]TargetAttachmentSpec{{Format = .Color, SampleCount = graphics_device.BackbufferSampleCount}}
 		target_init_with_attachments(target, graphics_device, size.X + 64, size.Y + 64, specs[:], "Backbuffer")
@@ -1220,6 +1207,9 @@ Show :: window_show
 Hide :: window_hide
 Close :: window_close
 Focus :: window_focus
+SetWindowSize :: window_set_size
+SetWindowFullscreen :: window_set_fullscreen
+SetWindowResizable :: window_set_resizable
 SetMouseVisible :: window_set_mouse_visible
 SetMouseRelativeMode :: window_set_mouse_relative_mode
 SetMousePosition :: window_set_mouse_position
