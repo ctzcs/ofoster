@@ -1,6 +1,6 @@
 package foster_framework
-
-import "core:sys/windows"
+// 库句柄与加载过程在 sdl3_windows.odin / sdl3_linux.odin 中按平台后缀自动选择:
+//   sdl_library / sdl_load_library() / sdl_get_proc(name) / sdl_library_loaded()
 
 SDL_InitFlags :: distinct u32
 
@@ -206,7 +206,6 @@ SDL_WINDOW_INPUT_FOCUS        : SDL_WindowFlags : SDL_WindowFlags(0x000000000000
 SDL_WINDOW_MOUSE_FOCUS        : SDL_WindowFlags : SDL_WindowFlags(0x0000000000000400)
 SDL_WINDOW_MAXIMIZED          : SDL_WindowFlags : SDL_WindowFlags(0x0000000000000080)
 
-sdl_library: windows.HMODULE
 
 SDL_Init_Proc            :: proc "c" (flags: SDL_InitFlags) -> SDLBool
 SDL_Quit_Proc            :: proc "c" ()
@@ -267,20 +266,13 @@ sdl_stop_text_input_ptr: SDL_StopTextInput_Proc
 sdl_text_input_active_ptr: SDL_TextInputActive_Proc
 
 sdl_require_loaded :: proc() {
-	if sdl_library != windows.HMODULE(nil) {
+	if sdl_library_loaded() {
 		return
 	}
-
-	sdl_library = windows.LoadLibraryW(windows.L("SDL3.dll"))
-	if sdl_library == windows.HMODULE(nil) {
-		sdl_library = windows.LoadLibraryW(windows.L("SDL3"))
-	}
-	if sdl_library == windows.HMODULE(nil) {
-		panic("Failed to load SDL3")
-	}
+	sdl_load_library()
 
 	load_proc :: proc(name: cstring) -> rawptr {
-		p := windows.GetProcAddress(sdl_library, cast(windows.LPCSTR)name)
+		p := sdl_get_proc(name)
 		if p == nil {
 			panic("Missing SDL3 symbol")
 		}
@@ -323,7 +315,7 @@ SDL_Init :: proc(flags: SDL_InitFlags) -> bool {
 }
 
 SDL_Quit :: proc() {
-	if sdl_library == windows.HMODULE(nil) {
+	if !sdl_library_loaded() {
 		return
 	}
 	sdl_quit_ptr()
