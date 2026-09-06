@@ -1,8 +1,6 @@
 package foster_framework
 
-import "core:c"
 import "core:math"
-import "core:strings"
 import coretime "core:time"
 import SDL "vendor:sdl3"
 

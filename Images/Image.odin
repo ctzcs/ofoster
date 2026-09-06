@@ -7,7 +7,6 @@ import "core:c"
 import "core:os"
 import "core:strings"
 import stbi "vendor:stb/image"
-import stbiw "vendor:stb/image"
 
 Image :: struct { Width, Height: int, Pixels: [dynamic]runtime.Color, IsDisposed: bool }
 ImageMake :: proc(width, height: int, fill := runtime.Transparent) -> Image { i:=Image{Width=width,Height=height}; resize(&i.Pixels,width*height); for n in 0..<len(i.Pixels) { i.Pixels[n]=fill }; return i }
@@ -26,7 +25,7 @@ ImageFromEncoded :: proc(data:[]u8)->Image {
 	return result
 }
 ImageLoadFile :: proc(path:string)->Image { data,err:=os.read_entire_file_from_path(path,context.temp_allocator); if err != nil{return {}}; return ImageFromEncoded(data) }
-ImageWritePng :: proc(i:^Image,path:string)->bool { if i.Width<=0||i.Height<=0||len(i.Pixels)==0{return false}; cstr,_:=strings.clone_to_cstring(path,context.temp_allocator); return stbiw.write_png(cstr,c.int(i.Width),c.int(i.Height),4,raw_data(i.Pixels),c.int(i.Width*4)) != 0 }
+ImageWritePng :: proc(i:^Image,path:string)->bool { if i.Width<=0||i.Height<=0||len(i.Pixels)==0{return false}; cstr,_:=strings.clone_to_cstring(path,context.temp_allocator); return stbi.write_png(cstr,c.int(i.Width),c.int(i.Height),4,raw_data(i.Pixels),c.int(i.Width*4)) != 0 }
 ImageWriteQoi :: proc(i:^Image,path:string)->bool { data:=ImageToQoi(i); if len(data)==0{return false}; return os.write_entire_file_from_bytes(path,data[:]) == nil }
 ImageLoad :: ImageLoadFile
 ImageWritePNG :: ImageWritePng

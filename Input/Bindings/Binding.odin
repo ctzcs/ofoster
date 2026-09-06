@@ -1,7 +1,5 @@
 package foster_input_bindings
 
-import "core:math"
-import "core:time"
 import runtime "../.."
 import enums "../Enums"
 
