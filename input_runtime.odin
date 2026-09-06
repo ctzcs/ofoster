@@ -666,14 +666,16 @@ input_update :: proc(input: ^Input, window: ^Window, stamp: coretime.Duration) {
 		return
 	}
 
+	// Wayland 不提供屏幕全局坐标(GetGlobalMouseState 与窗口位置恒为 0),
+	// 导致鼠标位置永远停在 (0,0)、所有点击判定失效。
+	// 改用窗口相对坐标的 GetMouseState: 各平台一致且 Wayland 安全。
 	wx, wy: f32
-	_ = SDL.GetGlobalMouseState(&wx, &wy)
-	pos := window_position(window)
+	_ = SDL.GetMouseState(&wx, &wy)
 	size := window_size(window)
 	size_px := window_size_in_pixels(window)
 
-	mouse_x := wx - f32(pos.X)
-	mouse_y := wy - f32(pos.Y)
+	mouse_x := wx
+	mouse_y := wy
 	if size.X != 0 && size.Y != 0 {
 		mouse_x = mouse_x / f32(size.X) * f32(size_px.X)
 		mouse_y = mouse_y / f32(size.Y) * f32(size_px.Y)
