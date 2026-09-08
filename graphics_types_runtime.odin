@@ -11,17 +11,26 @@ TextureFormat :: enum {
 	Depth16,
 	Depth24,
 	Depth32,
+	R16G16B16A16_FLOAT,
+	R32G32B32A32_FLOAT,
+	R11G11B10_UFLOAT,
 	Color = R8G8B8A8,
 }
 
 texture_format_size :: proc(format: TextureFormat) -> int {
-	#partial switch format {
+	switch format {
 	case .R8G8B8A8:
 		return 4
 	case .R8:
 		return 1
 	case .R8G8:
 		return 2
+	case .R16G16B16A16_FLOAT:
+		return 8
+	case .R32G32B32A32_FLOAT:
+		return 16
+	case .R11G11B10_UFLOAT:
+		return 4
 	case .Depth24Stencil8:
 		return 4
 	case .Depth32Stencil8:
@@ -33,27 +42,33 @@ texture_format_size :: proc(format: TextureFormat) -> int {
 	case .Depth32:
 		return 4
 	}
-	return 0
+	panic("Invalid TextureFormat")
 }
 
 texture_format_is_color_format :: proc(format: TextureFormat) -> bool {
-	#partial switch format {
-	case .R8G8B8A8, .R8, .R8G8:
+	switch format {
+	case .R8G8B8A8, .R8, .R8G8, .R16G16B16A16_FLOAT, .R32G32B32A32_FLOAT, .R11G11B10_UFLOAT:
 		return true
 	case .Depth24Stencil8, .Depth32Stencil8, .Depth16, .Depth24, .Depth32:
 		return false
 	}
-	return false
+	panic("Invalid TextureFormat")
 }
 
 texture_format_to_sdl :: proc(format: TextureFormat) -> SDL.GPUTextureFormat {
-	#partial switch format {
+	switch format {
 	case .R8G8B8A8:
 		return .R8G8B8A8_UNORM
 	case .R8:
 		return .R8_UNORM
 	case .R8G8:
 		return .R8G8_UNORM
+	case .R16G16B16A16_FLOAT:
+		return .R16G16B16A16_FLOAT
+	case .R32G32B32A32_FLOAT:
+		return .R32G32B32A32_FLOAT
+	case .R11G11B10_UFLOAT:
+		return .R11G11B10_UFLOAT
 	case .Depth24Stencil8:
 		return .D24_UNORM_S8_UINT
 	case .Depth32Stencil8:
@@ -65,7 +80,7 @@ texture_format_to_sdl :: proc(format: TextureFormat) -> SDL.GPUTextureFormat {
 	case .Depth32:
 		return .D32_FLOAT
 	}
-	return .INVALID
+	panic("Invalid TextureFormat")
 }
 
 SampleCount :: enum {
@@ -236,6 +251,19 @@ blend_mode_make_full :: proc(color_operation: BlendOp, color_source, color_desti
 		Mask = mask,
 		Color = color,
 	}
+}
+
+// Full replacement. This exact value disables hardware blending; it is also
+// equal to BlendModeMake(.Add, .One, .Zero).
+BlendModeDisabled :: BlendMode{
+	ColorOperation = .Add,
+	ColorSource = .One,
+	ColorDestination = .Zero,
+	AlphaOperation = .Add,
+	AlphaSource = .One,
+	AlphaDestination = .Zero,
+	Mask = .RGBA,
+	Color = White,
 }
 
 BlendModePremultiply :: BlendMode{

@@ -3,6 +3,31 @@ package foster_framework
 import "core:fmt"
 import SDL "vendor:sdl3"
 
+// Validation failures are logged once per reason per device. Pipeline failures
+// are tracked separately by pipeline hash and invalidated with their shaders.
+DrawFailure :: enum {
+	InvalidCommand,
+	MissingMaterial,
+	InvalidVertexBuffer,
+	InvalidStorageBuffer,
+	MissingShader,
+	MissingShaderResource,
+	ForeignTarget,
+	MissingTarget,
+	MissingColorTarget,
+	RenderPass,
+}
+
+report_draw_failure :: proc(device: ^GraphicsDevice, failure: DrawFailure, message: cstring, sdl_error: bool = false) {
+	if device == nil || failure in device.ReportedDrawFailures { return }
+	device.ReportedDrawFailures += {failure}
+	if sdl_error {
+		SDL.LogError(i32(SDL.LogCategory.GPU), "OFoster: %s: %s", message, SDL.GetError())
+	} else {
+		SDL.LogError(i32(SDL.LogCategory.GPU), "OFoster: %s", message)
+	}
+}
+
 DrawableTarget :: struct {
 	GraphicsDevice: ^GraphicsDevice,
 	Surface: rawptr,
@@ -540,6 +565,7 @@ begin_render_pass_ex :: proc(graphics_device: ^GraphicsDevice, target: DrawableT
 
 	resolved_target := resolve_drawable_target(graphics_device, target)
 	if resolved_target.GraphicsDevice != nil && resolved_target.GraphicsDevice != graphics_device {
+		report_draw_failure(graphics_device, .ForeignTarget, "render target belongs to another GraphicsDevice")
 		return false
 	}
 	if graphics_device.RenderPass != nil && drawable_target_matches(graphics_device.RenderPassTarget, resolved_target) && len(clear_colors) == 0 && !clear_depth && !clear_stencil {
@@ -550,6 +576,7 @@ begin_render_pass_ex :: proc(graphics_device: ^GraphicsDevice, target: DrawableT
 
 	target_ptr, target_size := drawable_target_backing_target(graphics_device, resolved_target)
 	if target_ptr == nil || len(target_ptr.Attachments) <= 0 {
+		report_draw_failure(graphics_device, .MissingTarget, "render target has no attachments")
 		return false
 	}
 
@@ -620,6 +647,7 @@ begin_render_pass_ex :: proc(graphics_device: ^GraphicsDevice, target: DrawableT
 	graphics_device.RenderPassTargetSize = target_size
 
 	if graphics_device.RenderPass == nil {
+		report_draw_failure(graphics_device, .RenderPass, "SDL_BeginGPURenderPass failed", true)
 		return false
 	}
 
@@ -864,14 +892,14 @@ graphics_device_release_pipeline_hashes :: proc(graphics_device: ^GraphicsDevice
 	if graphics_device == nil || graphics_device.Device == nil || hashes == nil {
 		return
 	}
-	if graphics_device.PipelineCache != nil {
-		for i := 0; i < len(hashes^); i += 1 {
-			h := (hashes^)[i]
+	for h in hashes^ {
+		delete_key(&graphics_device.FailedPipelineHashes, h)
+		if graphics_device.PipelineCache != nil {
 			if pipeline, ok := graphics_device.PipelineCache[h]; ok {
 				if pipeline != nil {
 					SDL.ReleaseGPUGraphicsPipeline(graphics_device.Device, pipeline)
 				}
-				graphics_device.PipelineCache[h] = nil
+				delete_key(&graphics_device.PipelineCache, h)
 			}
 		}
 	}
@@ -883,6 +911,9 @@ graphics_device_dispose_caches :: proc(graphics_device: ^GraphicsDevice) {
 	if graphics_device == nil || graphics_device.Device == nil {
 		return
 	}
+	delete(graphics_device.FailedPipelineHashes)
+	graphics_device.FailedPipelineHashes = nil
+	graphics_device.ReportedDrawFailures = {}
 	if graphics_device.PipelineCache != nil {
 		for _, pipeline in graphics_device.PipelineCache {
 			if pipeline != nil {
@@ -905,6 +936,11 @@ graphics_device_dispose_caches :: proc(graphics_device: ^GraphicsDevice) {
 
 create_pipeline_for_draw_command :: proc(graphics_device: ^GraphicsDevice, command: ^DrawCommand) -> ^SDL.GPUGraphicsPipeline {
 	if graphics_device == nil || graphics_device.Device == nil || command == nil || command.Material == nil || command.Material.Vertex.Shader == nil || command.Material.Fragment.Shader == nil {
+		report_draw_failure(graphics_device, .InvalidCommand, "cannot create pipeline: device, command, material or shader is missing")
+		return nil
+	}
+	if command.Material.Vertex.Shader.Resource == nil || command.Material.Fragment.Shader.Resource == nil {
+		report_draw_failure(graphics_device, .MissingShaderResource, "draw shader has no GPU resource (uninitialized or disposed)")
 		return nil
 	}
 	target := resolve_drawable_target(graphics_device, command.Target)
@@ -912,18 +948,21 @@ create_pipeline_for_draw_command :: proc(graphics_device: ^GraphicsDevice, comma
 		graphics_device.PipelineCache = make(map[u64]^SDL.GPUGraphicsPipeline)
 	}
 	if len(command.VertexBuffers) <= 0 {
+		report_draw_failure(graphics_device, .InvalidVertexBuffer, "draw requires a vertex buffer with a valid format and GPU resource")
 		return nil
 	}
 	vertex_buffer_count := len(command.VertexBuffers)
 	total_attributes := 0
 	for i := 0; i < vertex_buffer_count; i += 1 {
 		vb := command.VertexBuffers[i].Buffer
-		if vb == nil || vb.Stride <= 0 {
+		if vb == nil || vb.Stride <= 0 || vb.Base.Resource == nil {
+			report_draw_failure(graphics_device, .InvalidVertexBuffer, "draw requires a vertex buffer with a valid format and GPU resource")
 			return nil
 		}
 		total_attributes += len(vb.Format.Elements)
 	}
 	if total_attributes <= 0 {
+		report_draw_failure(graphics_device, .InvalidVertexBuffer, "draw vertex format has no attributes")
 		return nil
 	}
 	vb_desc := make([]SDL.GPUVertexBufferDescription, vertex_buffer_count, context.temp_allocator)
@@ -967,7 +1006,7 @@ create_pipeline_for_draw_command :: proc(graphics_device: ^GraphicsDevice, comma
 		dst_alpha_blendfactor = blend_factor_to_sdl(command.BlendMode.AlphaDestination),
 		alpha_blend_op = blend_op_to_sdl(command.BlendMode.AlphaOperation),
 		color_write_mask = blend_mask_to_sdl(command.BlendMode.Mask),
-		enable_blend = true,
+		enable_blend = command.BlendMode != BlendModeDisabled,
 		enable_color_write_mask = true,
 	}
 	color_target_desc := [8]SDL.GPUColorTargetDescription{}
@@ -976,6 +1015,7 @@ create_pipeline_for_draw_command :: proc(graphics_device: ^GraphicsDevice, comma
 	sample_count := SDL.GPUSampleCount._1
 	target_ptr, _ := drawable_target_backing_target(graphics_device, target)
 	if target_ptr == nil {
+		report_draw_failure(graphics_device, .MissingTarget, "cannot create pipeline: render target is missing")
 		return nil
 	}
 	for i := 0; i < len(target_ptr.Attachments); i += 1 {
@@ -996,6 +1036,7 @@ create_pipeline_for_draw_command :: proc(graphics_device: ^GraphicsDevice, comma
 		}
 	}
 	if color_target_count <= 0 {
+		report_draw_failure(graphics_device, .MissingColorTarget, "draw pipeline requires a color attachment")
 		return nil
 	}
 
@@ -1003,6 +1044,7 @@ create_pipeline_for_draw_command :: proc(graphics_device: ^GraphicsDevice, comma
 	hash = hash_mix_u64(hash, u64(uintptr(command.Material.Vertex.Shader.Resource)))
 	hash = hash_mix_u64(hash, u64(uintptr(command.Material.Fragment.Shader.Resource)))
 	hash = hash_blend_mode(hash, command.BlendMode)
+	hash = hash_mix_u64(hash, command.BlendMode == BlendModeDisabled ? 0 : 1)
 	hash = hash_mix_u64(hash, u64(command.CullMode))
 	hash = hash_mix_u64(hash, u64(command.FillMode))
 	hash = hash_mix_u64(hash, u64(command.BackStencilState.FailOp))
@@ -1108,14 +1150,34 @@ create_pipeline_for_draw_command :: proc(graphics_device: ^GraphicsDevice, comma
 	pipeline := SDL.CreateGPUGraphicsPipeline(graphics_device.Device, pipeline_info)
 	if pipeline != nil {
 		graphics_device.PipelineCache[hash] = pipeline
-		shader_register_pipeline_hash(command.Material.Vertex.Shader, hash)
-		shader_register_pipeline_hash(command.Material.Fragment.Shader, hash)
+		delete_key(&graphics_device.FailedPipelineHashes, hash)
+	} else if !graphics_device.FailedPipelineHashes[hash] {
+		if graphics_device.FailedPipelineHashes == nil {
+			graphics_device.FailedPipelineHashes = make(map[u64]bool)
+		}
+		graphics_device.FailedPipelineHashes[hash] = true
+		vertex_name := command.Material.Vertex.Shader.Name
+		fragment_name := command.Material.Fragment.Shader.Name
+		if len(vertex_name) == 0 { vertex_name = "<unnamed>" }
+		if len(fragment_name) == 0 { fragment_name = "<unnamed>" }
+		SDL.LogError(i32(SDL.LogCategory.GPU),
+			"OFoster: SDL_CreateGPUGraphicsPipeline failed (vertex='%.*s', fragment='%.*s'): %s",
+			i32(len(vertex_name)), raw_data(vertex_name), i32(len(fragment_name)), raw_data(fragment_name), SDL.GetError())
 	}
+	// Include failed attempts so disposal/reloading also clears their diagnostics.
+	shader_register_pipeline_hash(command.Material.Vertex.Shader, hash)
+	shader_register_pipeline_hash(command.Material.Fragment.Shader, hash)
 	return pipeline
 }
 
 graphics_device_draw :: proc(graphics_device: ^GraphicsDevice, command: ^DrawCommand) {
-	if graphics_device == nil || command == nil || command.Material == nil {
+	if graphics_device == nil { return }
+	if command == nil {
+		report_draw_failure(graphics_device, .InvalidCommand, "draw command is nil")
+		return
+	}
+	if command.Material == nil {
+		report_draw_failure(graphics_device, .MissingMaterial, "draw material is nil")
 		return
 	}
 	if !graphics_device.InFrame || graphics_device.CommandBuffer == nil {
@@ -1123,12 +1185,19 @@ graphics_device_draw :: proc(graphics_device: ^GraphicsDevice, command: ^DrawCom
 	}
 	target := resolve_drawable_target(graphics_device, command.Target)
 	if target.GraphicsDevice != nil && target.GraphicsDevice != graphics_device {
+		report_draw_failure(graphics_device, .ForeignTarget, "render target belongs to another GraphicsDevice")
 		return
 	}
 	if len(command.VertexBuffers) <= 0 || command.VertexBuffers[0].Buffer == nil || command.VertexBuffers[0].Buffer.Base.Resource == nil {
+		report_draw_failure(graphics_device, .InvalidVertexBuffer, "draw requires a vertex buffer with a valid format and GPU resource")
 		return
 	}
 	if command.Material.Vertex.Shader == nil || command.Material.Fragment.Shader == nil {
+		report_draw_failure(graphics_device, .MissingShader, "draw requires both vertex and fragment shaders")
+		return
+	}
+	if command.Material.Vertex.Shader.Resource == nil || command.Material.Fragment.Shader.Resource == nil {
+		report_draw_failure(graphics_device, .MissingShaderResource, "draw shader has no GPU resource (uninitialized or disposed)")
 		return
 	}
 	if !begin_render_pass(graphics_device, target) || graphics_device.RenderPass == nil {
@@ -1245,6 +1314,7 @@ graphics_device_draw :: proc(graphics_device: ^GraphicsDevice, command: ^DrawCom
 		for i := 0; i < storage_count; i += 1 {
 			sb := command.VertexStorageBuffers[i]
 			if sb == nil || sb.Base.Resource == nil {
+				report_draw_failure(graphics_device, .InvalidStorageBuffer, "draw storage buffer has no GPU resource")
 				return
 			}
 			buffers[i] = sb.Base.Resource
@@ -1258,6 +1328,7 @@ graphics_device_draw :: proc(graphics_device: ^GraphicsDevice, command: ^DrawCom
 		for i := 0; i < storage_count; i += 1 {
 			sb := command.FragmentStorageBuffers[i]
 			if sb == nil || sb.Base.Resource == nil {
+				report_draw_failure(graphics_device, .InvalidStorageBuffer, "draw storage buffer has no GPU resource")
 				return
 			}
 			buffers[i] = sb.Base.Resource

@@ -164,6 +164,8 @@ GraphicsDevice :: struct {
 	HasRenderPassScissor: bool,
 	SamplerCache: map[TextureSampler]^SDL.GPUSampler,
 	PipelineCache: map[u64]^SDL.GPUGraphicsPipeline,
+	FailedPipelineHashes: map[u64]bool,
+	ReportedDrawFailures: bit_set[DrawFailure],
 	UploadStaging: ^SDL.GPUTransferBuffer,
 	UploadStagingSize: u32,
 	UploadStagingCursor: u32,

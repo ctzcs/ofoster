@@ -249,6 +249,8 @@ texture_sample_resource :: proc(tex: ^Texture) -> ^SDL.GPUTexture {
 	return tex.Resource
 }
 
+// Data contains native texel bits, not converted RGBA8 colors: float formats
+// use f16/f32 components, and R11G11B10_UFLOAT uses packed unsigned float bits.
 texture_set_data :: proc(tex: ^Texture, data: rawptr, length: int) {
 	if tex == nil || tex.Disposed || tex.GraphicsDevice == nil || tex.GraphicsDevice.Device == nil || tex.Resource == nil {
 		panic("Resource is Disposed")
@@ -310,6 +312,7 @@ TextureDispose :: texture_dispose
 TextureSetData :: texture_set_data
 TextureSampleResource :: texture_sample_resource
 
+// Returns native texel bits in the texture's format; the caller decodes them.
 texture_download_data :: proc(tex: ^Texture, allocator := context.allocator) -> []byte {
 	if tex == nil || tex.Disposed || tex.GraphicsDevice == nil || tex.GraphicsDevice.Device == nil || tex.Resource == nil { return nil }
 	mem_size := texture_memory_size(tex)
@@ -327,7 +330,8 @@ texture_download_data :: proc(tex: ^Texture, allocator := context.allocator) -> 
 	SDL.EndGPUCopyPass(copy_pass)
 	if !SDL.SubmitGPUCommandBuffer(command_buffer) { return nil }
 	if !SDL.WaitForGPUIdle(tex.GraphicsDevice.Device) { return nil }
-	mapped := SDL.MapGPUTransferBuffer(tex.GraphicsDevice.Device, transfer, true)
+	// Read the completed download, preserving the transfer buffer's contents.
+	mapped := SDL.MapGPUTransferBuffer(tex.GraphicsDevice.Device, transfer, false)
 	if mapped == nil { return nil }
 	result := make([]byte, mem_size, allocator)
 	mem.copy(raw_data(result), mapped, mem_size)

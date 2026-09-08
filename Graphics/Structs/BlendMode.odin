@@ -4,3 +4,4 @@ import runtime "../.."
 
 BlendMode :: runtime.BlendMode
 BlendModeMake :: runtime.BlendModeMake
+BlendModeDisabled :: runtime.BlendModeDisabled
