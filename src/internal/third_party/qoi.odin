@@ -1,4 +1,4 @@
-package foster_internal_thirdparty
+package foster_third_party
 
 QoiDesc :: struct { Width, Height: u32, Channels, Colorspace: u8 }
 QoiIsFormat :: proc(data:[]u8)->bool{ return len(data)>=4 && data[0]=='q' && data[1]=='o' && data[2]=='i' && data[3]=='f' }

@@ -51,8 +51,8 @@ single package under `src/`, organized as topic files (`framework.odin`, `input.
 `spatial.odin`, `storage.odin`, ...). The mapping from upstream Foster's C#
 files to these files, plus intentional API differences, is documented in
 [PORTING_MAP.md](docs/PORTING_MAP.md). The only subpackages are the internal ones:
-`Internal/ThirdParty` (vendored C bindings) and `Internal/Web` (JS side of the
-web bridge).
+`internal/third_party` (vendored C bindings) and `internal/web` (JS side of
+the web bridge).
 
 ## Repository layout
 
@@ -62,7 +62,8 @@ web bridge).
   `spatial.odin`, `utility.odin`, `storage.odin`, `web.odin` (js bridge), plus
   `#+build` platform pair (`platform_native.odin` / `platform_web.odin`).
 - `assets/shaders/`: default shaders embedded at compile time via `#load`.
-- `Internal/`: vendored C bindings (`ThirdParty`) and the web bridge JS (`Web`).
+- `src/internal/`: vendored C bindings (`third_party`) and the web bridge JS
+  (`web`).
 - `tests/`: `webtest` (web acceptance program) and `graphics_regression`
   (GPU regression suite).
 - `docs/`: supplementary documentation — `PORTING_MAP.md` (upstream file

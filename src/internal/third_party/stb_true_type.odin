@@ -1,4 +1,4 @@
-package foster_internal_thirdparty
+package foster_third_party
 
 import "core:c"
 import stb "vendor:stb/truetype"

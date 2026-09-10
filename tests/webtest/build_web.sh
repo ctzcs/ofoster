@@ -1,6 +1,6 @@
 #!/bin/sh
 # OFoster webtest - Web (js_wasm32) 构建(Linux/macOS)
-# 产物: tests/webtest/webtest.wasm (+ 拷贝 odin.js; foster.js 由 index.html 相对引用 ../../Internal/Web/)
+# 产物: tests/webtest/webtest.wasm (+ 拷贝 odin.js; foster.js 由 index.html 相对引用 ../../internal/web/)
 # 运行: 仓库根目录起本地服务(python3 -m http.server 8137),
 #       浏览器打开 http://localhost:8137/tests/webtest/
 set -e

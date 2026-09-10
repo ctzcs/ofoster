@@ -1,6 +1,6 @@
 package foster_framework
 
-import qoi "./Internal/ThirdParty"
+import qoi "./internal/third_party"
 import "core:c"
 import "core:strings"
 import stbi "vendor:stb/image"
@@ -8,7 +8,7 @@ import "core:bytes"
 import "core:math"
 import zlib "core:compress/zlib"
 import json "core:encoding/json"
-import stb "./Internal/ThirdParty"
+import stb "./internal/third_party"
 import "core:mem"
 import "core:unicode/utf8"
 

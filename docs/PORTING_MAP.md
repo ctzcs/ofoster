@@ -12,8 +12,8 @@
 - 公共 API 全部在根包 `foster_framework`（`import foster "ofoster:."`），
   以少量主题文件组织（`framework`/`foundation`/`graphics`/`images`/`input`/
   `spatial`/`utility`/`storage`/`web`，外加 `#+build` 平台对与 `web.odin`）。
-  仅保留两个内部子包：`Internal/ThirdParty`（vendored C 绑定）与
-  `Internal/Web`（js 桥的 JS 侧）。
+  仅保留两个内部子包：`internal/third_party`（vendored C 绑定）与
+  `internal/web`（js 桥的 JS 侧）。
 - 历史上的 `Graphics/`、`Input/`、`Storage/`、`Spatial/`、`Utility/`、
   `Images/`、`Extensions/` 别名转发层已于 2026-09 移除。
 
@@ -36,13 +36,13 @@
 | `Framework/Input/VirtualInput/*` | `input.odin`（Virtual 一节） | 已移植 |
 | 光标 / 独立输入供给（工具、测试用） | `input.odin`（Provider/Cursor 一节） | 已移植 |
 | `Framework/Storage/*` | `storage.odin` + `platform_native/web.odin`（OS/路径层按 `#+build` 分侧） | 已移植 |
-| Web (js_wasm32) 桥 | `web.odin` + `Internal/Web/foster.js` | 已移植 |
+| Web (js_wasm32) 桥 | `web.odin` + `internal/web/foster.js` | 已移植 |
 | 线程 ID 平台差异 | `platform_native.odin` / `platform_web.odin`（线程 ID 一节） | 已移植 |
 | `Framework/Spatial/*`（Rect、Circle、Polygon 等） | `spatial.odin` | 已移植（RectInt 以本文件实现为准） |
 | `Framework/Utils/*`（Calc、Ease、Log、Pool、Rng 等） | `utility.odin` | 已移植 |
 | `Framework/Extensions/*` | `utility.odin`（Extensions 一节） | 已移植 |
 | `Framework/Images/*`（Image、Packer、Aseprite、Font、MsdfFont） | `images.odin` | 已移植 |
-| QOI / stb_truetype 绑定 | `Internal/ThirdParty/`（唯一保留的子包） | vendored |
+| QOI / stb_truetype 绑定 | `internal/third_party/`（唯一保留的子包） | vendored |
 
 C# 的接口（`IVertex`、`IProvideKerning`、`IDrawableTarget` 等）在 Odin 侧
 不设占位类型：顶点布局由 `VertexFormat` 运行时描述，字距由数据字段提供，

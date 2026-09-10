@@ -12,7 +12,7 @@ import "core:fmt"
 import "core:math"
 
 import foster "ofoster:."
-import stb "ofoster:Internal/ThirdParty"
+import stb "ofoster:internal/third_party"
 
 // 全局而非 main 局部: web 下 main() 的栈帧在 Run 返回后会被复用
 batcher: foster.Batcher

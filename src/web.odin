@@ -5,7 +5,7 @@ package foster_framework
 // Web (js_wasm32) 后端桥接层 —— M0: 生命周期 / 窗口尺寸 / 清屏 / 事件队列骨架。
 // 桥接模式沿用 vehicles/web-spike 已验证方案:
 //   - foreign import "foster_web" + contextless 声明, 参数只用原始类型
-//   - JS 侧手动实例化 wasm 并持有 memory(见 Internal/Web/foster.js)
+//   - JS 侧手动实例化 wasm 并持有 memory(见 internal/web/foster.js)
 //   - 帧循环由 JS requestAnimationFrame 驱动导出的 foster_step
 // 桌面平台不编译本文件; framework_runtime.odin 里的 `when ODIN_OS == .JS`
 // 分支引用此处符号, 分支外代码永不触碰 SDL 调用(未调用的 SDL proc 不进 wasm 导入表)。

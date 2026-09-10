@@ -20,7 +20,7 @@
 - **§7 风险项已有结论**：core:os 在 js 下完全不可用 → vehicles 直接使用 `os.read_entire_file_from_path` 等的存档代码**必须**走 `when ODIN_OS == .JS` 分流到虚拟 FS 桥（不是可选项）。
 - **栈上 App 的生命周期陷阱**：.JS 下 `main()` 在 `Run` 注册帧循环后立即返回，游戏在 `main` 里声明的**栈上 `App` 结构会被后续调用复用覆写**（实测第 ~120 帧被 `fmt.println` 调用链打穿）。框架在 **`run()` 入口**经 `web_relocate_app` 把 App **堆拷贝并修正内部回指针**（Window/Input/FileSystem/RenderTarget；放在入口是因为 StartupProc 在 run 内部执行，其中初始化的 Batcher 等会持有 `&app.GraphicsDevice`）。**约束：游戏经 `AppSetUserData` 传入的状态在 web 上必须是全局变量或堆分配，不能是 main() 局部变量**（vehicles 需要检查这一点）。
 - **rAF 与页面可见性**：浏览器对 hidden 页面暂停 requestAnimationFrame（符合预期，省电）；`pagehide → Quit` 事件已接通。IAB/无头测试环境里页面恒为 hidden，验收时需手动驱动 `foster_step`（webtest 已验证此法）。
-- **M0 验收结果**（webtest，Chrome IAB 实测）：600 帧长跑无中断、计时精确（2/4/6/8/10s）、画布像素读回游戏驱动的清屏色、resize 事件正常消费、Quit 干净走 `run_finish`、退出后防重入；桌面（Windows）构建回归通过。产物：`web.odin`（Odin 桥）、`Internal/Web/foster.js`（JS 桥）、`tests/webtest/`（验收程序 + 构建脚本）。
+- **M0 验收结果**（webtest，Chrome IAB 实测）：600 帧长跑无中断、计时精确（2/4/6/8/10s）、画布像素读回游戏驱动的清屏色、resize 事件正常消费、Quit 干净走 `run_finish`、退出后防重入；桌面（Windows）构建回归通过。产物：`web.odin`（Odin 桥）、`internal/web/foster.js`（JS 桥）、`tests/webtest/`（验收程序 + 构建脚本）。
 
 ### M2/M3/M4(2026-09-10)新增已验证事实
 
@@ -80,7 +80,7 @@ vehicles 以 `odin build src -target:js_wasm32 -collection:ofoster=..\OFoster\sr
 
 ## 2. 架构总则
 
-1. 公共 API 冻结；所有平台差异收进各 runtime 文件内部的 `when ODIN_OS == .JS` 分支，或新建 `Internal/Web/`（Odin 侧）+ `foster.js`（JS 侧，单文件，与 odin.js 一起加载）。
+1. 公共 API 冻结；所有平台差异收进各 runtime 文件内部的 `when ODIN_OS == .JS` 分支，或新建 `internal/web/`（Odin 侧）+ `foster.js`（JS 侧，单文件，与 odin.js 一起加载）。
 2. JS 桥命名沿用 spike 模式：`foreign import foster_web_lib "foster_web"`，全部 `contextless`，参数只用 i32/f32/rawptr/bool 等原始类型；字符串传 `rawptr+len`，JS 侧从 `memory` 读。
 3. 事件模型：**保持 framework.odin 现有的事件处理 switch 不动，只替换事件来源**。JS 侧把 DOM 事件写进一个双向环形队列（wasm 内存中的固定结构，或 JS 数组 + 逐条取），Odin 侧 `PumpEvents/PollEvent` 的等价物从队列取出并填入现有 SDL.Event 形状的结构（或在 JS 分支下用 Foster 内部事件枚举——二选一，倾向后者，避免假扮 SDL 结构）。
 4. 帧模型：`App.Run` 在 .JS 下**不得阻塞**——完成初始化后注册导出 `foster_step(f32 dt)`，每帧 = 消费事件队列 → `OnUpdate` → `OnRender` → present（rAF 合成）。`main` 返回即视为"进入事件循环"。
@@ -195,7 +195,7 @@ odin build src -collection:ofoster=<OFoster路径>/src -target:js_wasm32 -o:spee
 |---|---|
 | `<游戏名>.wasm` | 上面的构建命令 |
 | `odin.js` | `<odin安装>/core/sys/wasm/js/odin.js`（Odin 官方 wasm 运行时） |
-| `foster.js` | `OFoster/Internal/Web/foster.js`（OFoster 桥） |
+| `foster.js` | `OFoster/src/internal/web/foster.js`（OFoster 桥） |
 | 游戏桥 `*.js`（可选） | 游戏自己的 JS（如音频桥），经 `FOSTER_EXTRA_IMPORTS` 挂载 |
 | `index.html` | 照抄 `vehicles/web/index.html`：`<canvas id="foster">`、`window.FOSTER_WASM = "<游戏名>.wasm"`、按序引游戏桥 → odin.js → foster.js |
 
