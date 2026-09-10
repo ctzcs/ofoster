@@ -7,7 +7,6 @@ import "core:os"
 import "core:strings"
 import SDL "vendor:sdl3"
 import foster "ofoster:."
-import blend "ofoster:Graphics/Structs"
 
 pipeline_errors: int
 validation_errors: int
@@ -121,8 +120,8 @@ run :: proc(driver: foster.GraphicsDriver, directory: string) {
     foster.DrawCommandFromMesh(&command, foster.DrawableTargetFromTarget(&target), &mesh, &material)
     defer foster.DrawCommandDispose(&command)
     assert(command.BlendMode == foster.BlendModePremultiply)
-    assert(blend.BlendModeDisabled == foster.BlendModeMake(.Add, .One, .Zero))
-    command.BlendMode = blend.BlendModeDisabled
+    assert(foster.BlendModeDisabled == foster.BlendModeMake(.Add, .One, .Zero))
+    command.BlendMode = foster.BlendModeDisabled
     params := [1][4]f32{{2, 4, 8, 0.25}}
     foster.MaterialStageSetUniformBuffer(&material.Fragment, mem.slice_to_bytes(params[:]), 0)
     for frame in 0..<100 {

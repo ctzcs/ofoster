@@ -12,12 +12,10 @@ import "core:fmt"
 import "core:math"
 
 import foster "ofoster:."
-import graphics "ofoster:Graphics"
-import spatial "ofoster:Spatial"
 import stb "ofoster:Internal/ThirdParty"
 
 // 全局而非 main 局部: web 下 main() 的栈帧在 Run 返回后会被复用
-batcher: graphics.Batcher
+batcher: foster.Batcher
 font: stb.StbFont
 font_texture: foster.Texture
 checker_texture: foster.Texture
@@ -41,7 +39,7 @@ paused: bool
 marker_x: f32 = 640
 circle_scale: f32 = 1
 hue_shift: bool
-mouse_pos: spatial.Vec2
+mouse_pos: foster.Vec2
 
 main :: proc() {
 	app: foster.App
@@ -54,7 +52,7 @@ main :: proc() {
 }
 
 startup :: proc(app: ^foster.App) {
-	graphics.BatcherInit(&batcher, &app.GraphicsDevice, "WebTestBatcher")
+	foster.BatcherInit(&batcher, &app.GraphicsDevice, "WebTestBatcher")
 	bake_font(app)
 	make_checker_texture(app)
 	load_and_bump_visits(app)
@@ -175,14 +173,14 @@ update :: proc(app: ^foster.App) {
 	keyboard := &app.Input.State.Keyboard
 	mouse := &app.Input.State.Mouse
 
-	if foster.Pressed(keyboard, .Space) {
+	if foster.KeyboardPressed(keyboard, .Space) {
 		paused = !paused
 		fmt.println("[webtest] paused =", paused)
 	}
-	if foster.Down(keyboard, .Left) {
+	if foster.KeyboardDown(keyboard, .Left) {
 		marker_x -= 4
 	}
-	if foster.Down(keyboard, .Right) {
+	if foster.KeyboardDown(keyboard, .Right) {
 		marker_x += 4
 	}
 	if mouse.Wheel.Y != 0 {
@@ -191,7 +189,7 @@ update :: proc(app: ^foster.App) {
 	if foster.MousePressed(mouse, .Left) {
 		hue_shift = !hue_shift
 	}
-	mouse_pos = spatial.Vec2{mouse.Position.X, mouse.Position.Y}
+	mouse_pos = foster.Vec2{mouse.Position.X, mouse.Position.Y}
 }
 
 // ---- 渲染 ----
@@ -206,11 +204,11 @@ render :: proc(app: ^foster.App) {
 	}
 	pulse := 0.5 + 0.5 * math.sin(t * 1.5)
 
-	graphics.BatcherClear(&batcher)
+	foster.BatcherClear(&batcher)
 
 	// M2: 纹理四边形(棋盘格, Textured 管线)
-	graphics.BatcherQuadTexture(&batcher, &checker_texture,
-		spatial.Vec2{80, 60}, spatial.Vec2{300, 60}, spatial.Vec2{300, 200}, spatial.Vec2{80, 200},
+	foster.BatcherQuadTexture(&batcher, &checker_texture,
+		foster.Vec2{80, 60}, foster.Vec2{300, 60}, foster.Vec2{300, 200}, foster.Vec2{80, 200},
 		[2]f32{0, 0}, [2]f32{1, 0}, [2]f32{1, 1}, [2]f32{0, 1},
 		foster.White)
 
@@ -221,19 +219,19 @@ render :: proc(app: ^foster.App) {
 	// M1 形状: 呼吸矩形 + 缩放圆(M3 滚轮控制)
 	r := 60 + 120 * pulse
 	g := 130 + 100 * (1 - pulse)
-	graphics.BatcherRect(&batcher, spatial.Rect{80, 300, 220, 140}, foster.Color{u8(r), u8(g), 220, 255})
-	graphics.BatcherCircle(&batcher, spatial.Vec2{460, 370}, 70 * circle_scale, 32, foster.Color{70, 170, 235, 255})
-	graphics.BatcherCircleLine(&batcher, spatial.Vec2{460, 370}, 90 * circle_scale, 4, 48,
+	foster.BatcherRect(&batcher, foster.Rect{80, 300, 220, 140}, foster.Color{u8(r), u8(g), 220, 255})
+	foster.BatcherCircle(&batcher, foster.Vec2{460, 370}, 70 * circle_scale, 32, foster.Color{70, 170, 235, 255})
+	foster.BatcherCircleLine(&batcher, foster.Vec2{460, 370}, 90 * circle_scale, 4, 48,
 		hue_shift ? foster.Color{255, 140, 60, 255} : foster.Color{160, 120, 255, 255})
 
 	// M3: 键盘控制的红标矩形
-	graphics.BatcherRect(&batcher, spatial.Rect{marker_x - 16, 500, 32, 32}, foster.Color{235, 90, 90, 255})
+	foster.BatcherRect(&batcher, foster.Rect{marker_x - 16, 500, 32, 32}, foster.Color{235, 90, 90, 255})
 
 	// M3: 鼠标位置十字线
-	graphics.BatcherLine(&batcher, spatial.Vec2{mouse_pos[0] - 12, mouse_pos[1]}, spatial.Vec2{mouse_pos[0] + 12, mouse_pos[1]}, 2, foster.Color{255, 255, 255, 200})
-	graphics.BatcherLine(&batcher, spatial.Vec2{mouse_pos[0], mouse_pos[1] - 12}, spatial.Vec2{mouse_pos[0], mouse_pos[1] + 12}, 2, foster.Color{255, 255, 255, 200})
+	foster.BatcherLine(&batcher, foster.Vec2{mouse_pos[0] - 12, mouse_pos[1]}, foster.Vec2{mouse_pos[0] + 12, mouse_pos[1]}, 2, foster.Color{255, 255, 255, 200})
+	foster.BatcherLine(&batcher, foster.Vec2{mouse_pos[0], mouse_pos[1] - 12}, foster.Vec2{mouse_pos[0], mouse_pos[1] + 12}, 2, foster.Color{255, 255, 255, 200})
 
-	graphics.BatcherRender(&batcher, target)
+	foster.BatcherRender(&batcher, target)
 }
 
 draw_text :: proc(x, y: f32, text: string, color: foster.Color) {
@@ -255,8 +253,8 @@ draw_text :: proc(x, y: f32, text: string, color: foster.Color) {
 		y0 := y + g.Yoff
 		x1 := x0 + f32(g.Sw)
 		y1 := y0 + f32(g.Sh)
-		graphics.BatcherQuadTexture(&batcher, &font_texture,
-			spatial.Vec2{x0, y0}, spatial.Vec2{x1, y0}, spatial.Vec2{x1, y1}, spatial.Vec2{x0, y1},
+		foster.BatcherQuadTexture(&batcher, &font_texture,
+			foster.Vec2{x0, y0}, foster.Vec2{x1, y0}, foster.Vec2{x1, y1}, foster.Vec2{x0, y1},
 			[2]f32{u0, v0}, [2]f32{u1, v0}, [2]f32{u1, v1}, [2]f32{u0, v1},
 			color)
 		tx += g.Advance

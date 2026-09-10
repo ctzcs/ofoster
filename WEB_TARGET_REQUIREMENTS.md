@@ -20,7 +20,7 @@
 - **§7 风险项已有结论**：core:os 在 js 下完全不可用 → vehicles 直接使用 `os.read_entire_file_from_path` 等的存档代码**必须**走 `when ODIN_OS == .JS` 分流到虚拟 FS 桥（不是可选项）。
 - **栈上 App 的生命周期陷阱**：.JS 下 `main()` 在 `Run` 注册帧循环后立即返回，游戏在 `main` 里声明的**栈上 `App` 结构会被后续调用复用覆写**（实测第 ~120 帧被 `fmt.println` 调用链打穿）。框架在 **`run()` 入口**经 `web_relocate_app` 把 App **堆拷贝并修正内部回指针**（Window/Input/FileSystem/RenderTarget；放在入口是因为 StartupProc 在 run 内部执行，其中初始化的 Batcher 等会持有 `&app.GraphicsDevice`）。**约束：游戏经 `AppSetUserData` 传入的状态在 web 上必须是全局变量或堆分配，不能是 main() 局部变量**（vehicles 需要检查这一点）。
 - **rAF 与页面可见性**：浏览器对 hidden 页面暂停 requestAnimationFrame（符合预期，省电）；`pagehide → Quit` 事件已接通。IAB/无头测试环境里页面恒为 hidden，验收时需手动驱动 `foster_step`（webtest 已验证此法）。
-- **M0 验收结果**（webtest，Chrome IAB 实测）：600 帧长跑无中断、计时精确（2/4/6/8/10s）、画布像素读回游戏驱动的清屏色、resize 事件正常消费、Quit 干净走 `run_finish`、退出后防重入；桌面（Windows）构建回归通过。产物：`web_runtime.odin`（Odin 桥）、`Internal/Web/foster.js`（JS 桥）、`webtest/`（验收程序 + 构建脚本）。
+- **M0 验收结果**（webtest，Chrome IAB 实测）：600 帧长跑无中断、计时精确（2/4/6/8/10s）、画布像素读回游戏驱动的清屏色、resize 事件正常消费、Quit 干净走 `run_finish`、退出后防重入；桌面（Windows）构建回归通过。产物：`web.odin`（Odin 桥）、`Internal/Web/foster.js`（JS 桥）、`webtest/`（验收程序 + 构建脚本）。
 
 ### M2/M3/M4(2026-09-10)新增已验证事实
 
@@ -71,10 +71,10 @@ vehicles 以 `odin build src -target:js_wasm32 -collection:ofoster=..\OFoster` �
 
 ### Phase 1 非目标（可 stub 或 panic，留 TODO）
 
-- GPU compute（`graphics_compute_runtime.odin`；vehicles 未使用——审计确认）
+- GPU compute（`graphics_compute.odin`；vehicles 未使用——审计确认）
 - `BlitGPUTexture` / `DownloadFromGPUTexture`（vehicles 未使用）
-- Gamepad（`input_runtime.odin` 里的 SDL.IsGamepad / AddGamepadMapping 等）
-- 文件对话框（`storage_runtime.odin:382-406`）
+- Gamepad（`input.odin` 里的 SDL.IsGamepad / AddGamepadMapping 等）
+- 文件对话框（`storage.odin:382-406`）
 - 全屏 API、文本输入（SDL textinput）
 - MSAA、多窗口
 
@@ -82,22 +82,22 @@ vehicles 以 `odin build src -target:js_wasm32 -collection:ofoster=..\OFoster` �
 
 1. 公共 API 冻结；所有平台差异收进各 runtime 文件内部的 `when ODIN_OS == .JS` 分支，或新建 `Internal/Web/`（Odin 侧）+ `foster.js`（JS 侧，单文件，与 odin.js 一起加载）。
 2. JS 桥命名沿用 spike 模式：`foreign import foster_web_lib "foster_web"`，全部 `contextless`，参数只用 i32/f32/rawptr/bool 等原始类型；字符串传 `rawptr+len`，JS 侧从 `memory` 读。
-3. 事件模型：**保持 framework_runtime 现有的事件处理 switch 不动，只替换事件来源**。JS 侧把 DOM 事件写进一个双向环形队列（wasm 内存中的固定结构，或 JS 数组 + 逐条取），Odin 侧 `PumpEvents/PollEvent` 的等价物从队列取出并填入现有 SDL.Event 形状的结构（或在 JS 分支下用 Foster 内部事件枚举——二选一，倾向后者，避免假扮 SDL 结构）。
+3. 事件模型：**保持 framework.odin 现有的事件处理 switch 不动，只替换事件来源**。JS 侧把 DOM 事件写进一个双向环形队列（wasm 内存中的固定结构，或 JS 数组 + 逐条取），Odin 侧 `PumpEvents/PollEvent` 的等价物从队列取出并填入现有 SDL.Event 形状的结构（或在 JS 分支下用 Foster 内部事件枚举——二选一，倾向后者，避免假扮 SDL 结构）。
 4. 帧模型：`App.Run` 在 .JS 下**不得阻塞**——完成初始化后注册导出 `foster_step(f32 dt)`，每帧 = 消费事件队列 → `OnUpdate` → `OnRender` → present（rAF 合成）。`main` 返回即视为"进入事件循环"。
 
 ## 3. SDL 平台面替换清单（审计自当前代码，含位置）
 
 | 功能 | 现状（文件:行） | Web 实现要求 |
 |---|---|---|
-| 启动初始化 | framework_runtime.odin:1244 `SDL.Init` | no-op（GL 上下文由 JS 创建 canvas 时取得） |
-| 窗口创建 | framework_runtime.odin:948 `SDL.CreateWindow` | canvas 元素即窗口；尺寸/标题（`document.title`）/flags 忽略或映射 |
-| 事件循环 | framework_runtime.odin:1303-1306 `PumpEvents/PollEvent` | 消费 JS 事件队列（见 §2.3） |
-| 相对鼠标 | framework_runtime.odin:1114-1117、input_runtime.odin:685 | Pointer Lock API；`WarpMouseInWindow` 在锁定模式下 no-op |
-| 光标 | input_runtime.odin（CreateSystemCursor/CreateColorCursor/SetCursor/CursorVisible） | CSS `cursor` 样式映射；CursorVisible ↔ 隐藏/显示 |
-| 剪贴板 | input_runtime.odin:704-709, 904-905 | `navigator.clipboard`。注意 Foster API 是同步的：GetClipboardText 返回 JS 侧缓存的最近值，SetClipboardText fire-and-forget |
-| 偏好路径 | storage_runtime.odin:337 `SDL.GetPrefPath` | 返回虚拟 FS 前缀（见 §7） |
-| 基路径 | storage_runtime.odin:349 `SDL.GetBasePath` | 返回虚拟 FS 的内嵌资产前缀（见 §7） |
-| 文件对话框 | storage_runtime.odin:382-406 `ShowFileDialogWithProperties` | Phase 1：回调立即失败/返回 not-supported；后续可桥 `<input type=file>` |
+| 启动初始化 | framework.odin:1244 `SDL.Init` | no-op（GL 上下文由 JS 创建 canvas 时取得） |
+| 窗口创建 | framework.odin:948 `SDL.CreateWindow` | canvas 元素即窗口；尺寸/标题（`document.title`）/flags 忽略或映射 |
+| 事件循环 | framework.odin:1303-1306 `PumpEvents/PollEvent` | 消费 JS 事件队列（见 §2.3） |
+| 相对鼠标 | framework.odin:1114-1117、input.odin:685 | Pointer Lock API；`WarpMouseInWindow` 在锁定模式下 no-op |
+| 光标 | input.odin（CreateSystemCursor/CreateColorCursor/SetCursor/CursorVisible） | CSS `cursor` 样式映射；CursorVisible ↔ 隐藏/显示 |
+| 剪贴板 | input.odin:704-709, 904-905 | `navigator.clipboard`。注意 Foster API 是同步的：GetClipboardText 返回 JS 侧缓存的最近值，SetClipboardText fire-and-forget |
+| 偏好路径 | storage.odin:337 `SDL.GetPrefPath` | 返回虚拟 FS 前缀（见 §7） |
+| 基路径 | storage.odin:349 `SDL.GetBasePath` | 返回虚拟 FS 的内嵌资产前缀（见 §7） |
+| 文件对话框 | storage.odin:382-406 `ShowFileDialogWithProperties` | Phase 1：回调立即失败/返回 not-supported；后续可桥 `<input type=file>` |
 | 关窗/焦点 | `SDL.GetWindowFlags`（4 处） | 映射 visibilitychange / blur / pagehide 事件 |
 
 ## 4. 图形后端：WebGL2（Phase 1 决策）
@@ -111,7 +111,7 @@ vehicles 以 `odin build src -target:js_wasm32 -collection:ofoster=..\OFoster` �
 
 ### 需要覆盖的 SDL_GPU 子集（来自 graphics_*.odin 审计）
 
-- Device：`CreateGPUDevice`（framework_runtime.odin:257，着色器格式 {.SPIRV,.DXIL,.MSL} 需加 .JS 分支）、`ClaimWindowForGPUDevice`（:300）、`WaitForGPUIdle`、`DestroyGPUDevice`。
+- Device：`CreateGPUDevice`（framework.odin:257，着色器格式 {.SPIRV,.DXIL,.MSL} 需加 .JS 分支）、`ClaimWindowForGPUDevice`（:300）、`WaitForGPUIdle`、`DestroyGPUDevice`。
 - 命令缓冲：`AcquireGPUCommandBuffer` / `SubmitGPUCommandBuffer` / `CancelGPUCommandBuffer` —— Phase 1 直接映射为即时 GL 调用（Acquire 返回哑句柄，Submit 交由 rAF 合成），保持 API 形状。
 - Transfer buffer：Create/Map/Unmap/Release、`UploadToGPUBuffer`、`UploadToGPUTexture`（经 `BeginGPUCopyPass/EndGPUCopyPass`）→ GL 的 `bufferSubData` / `texSubImage2D`。
 - Texture / Sampler：Create/Release、`GPUTextureSupportsSampleCount`（Phase 1 恒返回 1x 支持与否的假值）。
@@ -123,7 +123,7 @@ vehicles 以 `odin build src -target:js_wasm32 -collection:ofoster=..\OFoster` �
 
 ## 5. 着色器
 
-- 现状：framework_runtime.odin:210-219 以 `#load` 内嵌预编译 SPIRV/DXIL/MSL（Batcher、Textured 等）。
+- 现状：framework.odin:210-219 以 `#load` 内嵌预编译 SPIRV/DXIL/MSL（Batcher、Textured 等）。
 - 需求：新增 GLSL ES 3.00 源码版本（`.glsl` 文件，`#load` 为字符串），用 `when ODIN_OS == .JS` 分支选择；JS/Odin 侧用 `gl.shaderSource` 编译。顶点布局、绑定槽位与现有管线一致。**着色器翻译要覆盖 OFoster 内全部 #load 的着色器，缺一个运行时就 panic。**
 
 ## 6. 帧循环与生命周期（对照 spike 已验证模式）
