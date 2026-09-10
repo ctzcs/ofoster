@@ -2,10 +2,10 @@ package foster_images
 
 import spatial "../Spatial"
 import runtime ".."
-import "core:os"
 import "core:bytes"
 import "core:math"
 import zlib "core:compress/zlib"
+// core:os 经根包 storage_os_* 平台层使用(js 目标无 core:os)
 
 AsepriteBlendMode :: enum { Normal, Multiply, Screen, Overlay, Darken, Lighten, ColorDodge, ColorBurn, HardLight, SoftLight, Difference, Exclusion, Hue, Saturation, Color, Luminosity, Addition, Subtract, Divide }
 AsepriteLayerType :: enum { Normal, Group, Tilemap }
@@ -109,7 +109,7 @@ AsepriteLoad :: proc(data: []u8) -> Aseprite {
 	return a
 }
 
-AsepriteLoadFile :: proc(path:string)->Aseprite { data,err:=os.read_entire_file_from_path(path,context.temp_allocator); if err!=nil{return {}}; return AsepriteLoad(data) }
+AsepriteLoadFile :: proc(path:string)->Aseprite { data:=runtime.storage_os_read_file(path,context.temp_allocator); if data==nil{return {}}; return AsepriteLoad(data) }
 ase_effective_opacity :: proc(a:^Aseprite, layer_index:int, cel_opacity:u8)->f32 { if layer_index<0||layer_index>=len(a.Layers){return 0}; if .Visible not_in a.Layers[layer_index].Flags{return 0}; value:=f32(cel_opacity)/255*f32(a.Layers[layer_index].Opacity)/255; level:=a.Layers[layer_index].ChildLevel; for i:=layer_index-1;i>=0;i-=1{if a.Layers[i].ChildLevel<level{if a.Layers[i].Type==.Group{if .Visible not_in a.Layers[i].Flags{return 0};value*=f32(a.Layers[i].Opacity)/255};level=a.Layers[i].ChildLevel}}; return value }
 ase_blend_channel :: proc(mode:AsepriteBlendMode, base, blend:f32)->f32 { #partial switch mode {
 	case .Multiply: return base*blend

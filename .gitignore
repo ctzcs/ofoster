@@ -1,2 +1,5 @@
 build/
 /build
+webtest/*.wasm
+webtest/*.exe
+webtest/odin.js

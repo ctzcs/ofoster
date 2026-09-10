@@ -21,10 +21,14 @@ DrawFailure :: enum {
 report_draw_failure :: proc(device: ^GraphicsDevice, failure: DrawFailure, message: cstring, sdl_error: bool = false) {
 	if device == nil || failure in device.ReportedDrawFailures { return }
 	device.ReportedDrawFailures += {failure}
-	if sdl_error {
-		SDL.LogError(i32(SDL.LogCategory.GPU), "OFoster: %s: %s", message, SDL.GetError())
+	when ODIN_OS == .JS {
+		web_log(fmt.aprintf("OFoster: %s", message))
 	} else {
-		SDL.LogError(i32(SDL.LogCategory.GPU), "OFoster: %s", message)
+		if sdl_error {
+			SDL.LogError(i32(SDL.LogCategory.GPU), "OFoster: %s: %s", message, SDL.GetError())
+		} else {
+			SDL.LogError(i32(SDL.LogCategory.GPU), "OFoster: %s", message)
+		}
 	}
 }
 
@@ -134,6 +138,23 @@ target_init :: proc(target: ^Target, graphics_device: ^GraphicsDevice, width, he
 
 target_dispose :: proc(target: ^Target) {
 	if target == nil || target.Disposed {
+		return
+	}
+
+	when ODIN_OS == .JS {
+		for i := 0; i < len(target.Attachments); i += 1 {
+			if target.Attachments[i].GraphicsDevice != nil && target.Attachments[i].GraphicsDevice.Device != nil {
+				if target.Attachments[i].Resource != nil && !target.Attachments[i].IsTargetAttachment {
+					fw_gl_release_texture(web_handle_u32(rawptr(target.Attachments[i].Resource)))
+				}
+				if target.Attachments[i].ResolveResource != nil {
+					fw_gl_release_texture(web_handle_u32(rawptr(target.Attachments[i].ResolveResource)))
+				}
+			}
+			target.Attachments[i].Disposed = true
+		}
+		delete(target.Attachments)
+		target.Disposed = true
 		return
 	}
 
@@ -547,7 +568,11 @@ end_render_pass :: proc(graphics_device: ^GraphicsDevice) {
 		return
 	}
 	if graphics_device.RenderPass != nil {
-		SDL.EndGPURenderPass(graphics_device.RenderPass)
+		when ODIN_OS == .JS {
+			fw_end_pass()
+		} else {
+			SDL.EndGPURenderPass(graphics_device.RenderPass)
+		}
 	}
 	graphics_device.RenderPass = nil
 	graphics_device.RenderPassTarget = {}
@@ -569,6 +594,29 @@ begin_render_pass_ex :: proc(graphics_device: ^GraphicsDevice, target: DrawableT
 		return false
 	}
 	if graphics_device.RenderPass != nil && drawable_target_matches(graphics_device.RenderPassTarget, resolved_target) && len(clear_colors) == 0 && !clear_depth && !clear_stencil {
+		return true
+	}
+
+	when ODIN_OS == .JS {
+		// Web: 窗口目标 → 画布默认帧缓冲; 离屏纹理目标留待 M2(FBO)
+		if !resolved_target.IsWindow {
+			report_draw_failure(graphics_device, .MissingTarget, "offscreen render targets are not supported on web yet (M2)")
+			return false
+		}
+		end_render_pass(graphics_device)
+		if len(clear_colors) > 0 {
+			cc := ColorToSDL(clear_colors[0])
+			fw_begin_pass(0, cc.r, cc.g, cc.b, cc.a, 1)
+		} else {
+			fw_begin_pass(0, 0, 0, 0, 0, 0)
+		}
+		graphics_device.RenderPass = cast(^SDL.GPURenderPass)&web_renderpass_placeholder
+		graphics_device.RenderPassTarget = resolved_target
+		graphics_device.RenderPassTargetSize = drawable_target_size_in_pixels(resolved_target)
+		graphics_device.RenderPassPipeline = nil
+		graphics_device.RenderPassIndexBuffer = nil
+		graphics_device.HasRenderPassViewport = false
+		graphics_device.HasRenderPassScissor = false
 		return true
 	}
 
@@ -829,6 +877,15 @@ create_sampler_from_texture_sampler :: proc(graphics_device: ^GraphicsDevice, sa
 	}
 	if cached, ok := graphics_device.SamplerCache[sampler]; ok && cached != nil {
 		return cached
+	}
+	when ODIN_OS == .JS {
+		handle := fw_gl_create_sampler(web_texture_filter(sampler.Filter), web_texture_wrap(sampler.WrapX), web_texture_wrap(sampler.WrapY))
+		if handle != 0 {
+			created := cast(^SDL.GPUSampler)(web_handle_ptr(handle))
+			graphics_device.SamplerCache[sampler] = created
+			return created
+		}
+		return nil
 	}
 	info := SDL.GPUSamplerCreateInfo{
 		min_filter = texture_filter_to_sdl(sampler.Filter),
@@ -1102,6 +1159,37 @@ create_pipeline_for_draw_command :: proc(graphics_device: ^GraphicsDevice, comma
 	if cached, ok := graphics_device.PipelineCache[hash]; ok && cached != nil {
 		return cached
 	}
+
+	when ODIN_OS == .JS {
+		blend_enable := u32(0)
+		if command.BlendMode != BlendModeDisabled {
+			blend_enable = 1
+		}
+		handle := fw_gl_create_pipeline(
+			web_handle_u32(rawptr(command.Material.Vertex.Shader.Resource)),
+			web_handle_u32(rawptr(command.Material.Fragment.Shader.Resource)),
+			blend_enable,
+			web_blend_factor(command.BlendMode.ColorSource), web_blend_factor(command.BlendMode.ColorDestination), web_blend_op(command.BlendMode.ColorOperation),
+			web_blend_factor(command.BlendMode.AlphaSource), web_blend_factor(command.BlendMode.AlphaDestination), web_blend_op(command.BlendMode.AlphaOperation),
+			u32(u8(command.BlendMode.Mask)),
+			web_cull_mode(command.CullMode), web_fill_mode(command.FillMode))
+		if handle != 0 {
+			graphics_device.PipelineCache[hash] = cast(^SDL.GPUGraphicsPipeline)(web_handle_ptr(handle))
+		} else if !graphics_device.FailedPipelineHashes[hash] {
+			if graphics_device.FailedPipelineHashes == nil {
+				graphics_device.FailedPipelineHashes = make(map[u64]bool)
+			}
+			graphics_device.FailedPipelineHashes[hash] = true
+			web_log("OFoster: web pipeline creation failed")
+		}
+		shader_register_pipeline_hash(command.Material.Vertex.Shader, hash)
+		shader_register_pipeline_hash(command.Material.Fragment.Shader, hash)
+		if handle != 0 {
+			return graphics_device.PipelineCache[hash]
+		}
+		return nil
+	}
+
 	target_info := SDL.GPUGraphicsPipelineTargetInfo{
 		color_target_descriptions = &color_target_desc[0],
 		num_color_targets = u32(color_target_count),
@@ -1209,24 +1297,34 @@ graphics_device_draw :: proc(graphics_device: ^GraphicsDevice, command: ^DrawCom
 		return
 	}
 	if graphics_device.RenderPassPipeline != pipeline {
-		SDL.BindGPUGraphicsPipeline(graphics_device.RenderPass, pipeline)
+		when ODIN_OS == .JS {
+			fw_bind_pipeline(web_handle_u32(rawptr(pipeline)))
+		} else {
+			SDL.BindGPUGraphicsPipeline(graphics_device.RenderPass, pipeline)
+		}
 		graphics_device.RenderPassPipeline = pipeline
 	}
-	SDL.SetGPUStencilReference(graphics_device.RenderPass, command.StencilReferenceValue)
+	when ODIN_OS != .JS {
+		SDL.SetGPUStencilReference(graphics_device.RenderPass, command.StencilReferenceValue)
+	}
 
 	viewport := RectInt{0, 0, graphics_device.RenderPassTargetSize.X, graphics_device.RenderPassTargetSize.Y}
 	if command.HasViewport {
 		viewport = command.Viewport
 	}
 	if !graphics_device.HasRenderPassViewport || graphics_device.RenderPassViewport != viewport {
-		SDL.SetGPUViewport(graphics_device.RenderPass, SDL.GPUViewport{
-			x = f32(viewport.X),
-			y = f32(viewport.Y),
-			w = f32(viewport.Width),
-			h = f32(viewport.Height),
-			min_depth = 0,
-			max_depth = 1,
-		})
+		when ODIN_OS == .JS {
+			fw_set_viewport(i32(viewport.X), i32(viewport.Y), i32(viewport.Width), i32(viewport.Height), i32(graphics_device.RenderPassTargetSize.Y))
+		} else {
+			SDL.SetGPUViewport(graphics_device.RenderPass, SDL.GPUViewport{
+				x = f32(viewport.X),
+				y = f32(viewport.Y),
+				w = f32(viewport.Width),
+				h = f32(viewport.Height),
+				min_depth = 0,
+				max_depth = 1,
+			})
+		}
 		graphics_device.RenderPassViewport = viewport
 		graphics_device.HasRenderPassViewport = true
 	}
@@ -1236,12 +1334,16 @@ graphics_device_draw :: proc(graphics_device: ^GraphicsDevice, command: ^DrawCom
 		scissor = command.Scissor
 	}
 	if !graphics_device.HasRenderPassScissor || graphics_device.RenderPassScissor != scissor {
-		SDL.SetGPUScissor(graphics_device.RenderPass, SDL.Rect{
-			x = i32(scissor.X),
-			y = i32(scissor.Y),
-			w = i32(scissor.Width),
-			h = i32(scissor.Height),
-		})
+		when ODIN_OS == .JS {
+			fw_set_scissor(i32(scissor.X), i32(scissor.Y), i32(scissor.Width), i32(scissor.Height), i32(graphics_device.RenderPassTargetSize.Y))
+		} else {
+			SDL.SetGPUScissor(graphics_device.RenderPass, SDL.Rect{
+				x = i32(scissor.X),
+				y = i32(scissor.Y),
+				w = i32(scissor.Width),
+				h = i32(scissor.Height),
+			})
+		}
 		graphics_device.RenderPassScissor = scissor
 		graphics_device.HasRenderPassScissor = true
 	}
@@ -1250,65 +1352,130 @@ graphics_device_draw :: proc(graphics_device: ^GraphicsDevice, command: ^DrawCom
 	fragment_info := command.Material.Fragment.Shader.CreateInfo
 
 	if vertex_info.SamplerCount > 0 {
-		vb := make([]SDL.GPUTextureSamplerBinding, vertex_info.SamplerCount, context.temp_allocator)
-		for i := 0; i < len(vb); i += 1 {
-			texture := graphics_device.DebugTexture
-			sampler := graphics_device.DebugSampler
-			if command.Material.Vertex.Samplers[i].Texture != nil {
-				texture = texture_sample_resource(command.Material.Vertex.Samplers[i].Texture)
-				cached := create_sampler_from_texture_sampler(graphics_device, command.Material.Vertex.Samplers[i].Sampler)
-				if cached != nil {
-					sampler = cached
+		when ODIN_OS == .JS {
+			for i := 0; i < vertex_info.SamplerCount; i += 1 {
+				texture_handle := u32(0) // 0 = JS 侧 1x1 白纹理占位
+				sampler_handle := u32(0)
+				if command.Material.Vertex.Samplers[i].Texture != nil {
+					texture_handle = web_handle_u32(rawptr(texture_sample_resource(command.Material.Vertex.Samplers[i].Texture)))
+					if cached := create_sampler_from_texture_sampler(graphics_device, command.Material.Vertex.Samplers[i].Sampler); cached != nil {
+						sampler_handle = web_handle_u32(rawptr(cached))
+					}
 				}
+				fw_bind_texture(u32(i), texture_handle, sampler_handle)
 			}
-			vb[i] = SDL.GPUTextureSamplerBinding{texture = texture, sampler = sampler}
+		} else {
+			vb := make([]SDL.GPUTextureSamplerBinding, vertex_info.SamplerCount, context.temp_allocator)
+			for i := 0; i < len(vb); i += 1 {
+				texture := graphics_device.DebugTexture
+				sampler := graphics_device.DebugSampler
+				if command.Material.Vertex.Samplers[i].Texture != nil {
+					texture = texture_sample_resource(command.Material.Vertex.Samplers[i].Texture)
+					cached := create_sampler_from_texture_sampler(graphics_device, command.Material.Vertex.Samplers[i].Sampler)
+					if cached != nil {
+						sampler = cached
+					}
+				}
+				vb[i] = SDL.GPUTextureSamplerBinding{texture = texture, sampler = sampler}
+			}
+			SDL.BindGPUVertexSamplers(graphics_device.RenderPass, 0, &vb[0], u32(len(vb)))
 		}
-		SDL.BindGPUVertexSamplers(graphics_device.RenderPass, 0, &vb[0], u32(len(vb)))
 	}
 
 	if fragment_info.SamplerCount > 0 {
-		fb := make([]SDL.GPUTextureSamplerBinding, fragment_info.SamplerCount, context.temp_allocator)
-		for i := 0; i < len(fb); i += 1 {
-			texture := graphics_device.DebugTexture
-			sampler := graphics_device.DebugSampler
-			if command.Material.Fragment.Samplers[i].Texture != nil {
-				texture = texture_sample_resource(command.Material.Fragment.Samplers[i].Texture)
-				cached := create_sampler_from_texture_sampler(graphics_device, command.Material.Fragment.Samplers[i].Sampler)
-				if cached != nil {
-					sampler = cached
+		when ODIN_OS == .JS {
+			for i := 0; i < fragment_info.SamplerCount; i += 1 {
+				texture_handle := u32(0)
+				sampler_handle := u32(0)
+				if command.Material.Fragment.Samplers[i].Texture != nil {
+					texture_handle = web_handle_u32(rawptr(texture_sample_resource(command.Material.Fragment.Samplers[i].Texture)))
+					if cached := create_sampler_from_texture_sampler(graphics_device, command.Material.Fragment.Samplers[i].Sampler); cached != nil {
+						sampler_handle = web_handle_u32(rawptr(cached))
+					}
 				}
+				fw_bind_texture(u32(i), texture_handle, sampler_handle)
 			}
-			fb[i] = SDL.GPUTextureSamplerBinding{texture = texture, sampler = sampler}
+		} else {
+			fb := make([]SDL.GPUTextureSamplerBinding, fragment_info.SamplerCount, context.temp_allocator)
+			for i := 0; i < len(fb); i += 1 {
+				texture := graphics_device.DebugTexture
+				sampler := graphics_device.DebugSampler
+				if command.Material.Fragment.Samplers[i].Texture != nil {
+					texture = texture_sample_resource(command.Material.Fragment.Samplers[i].Texture)
+					cached := create_sampler_from_texture_sampler(graphics_device, command.Material.Fragment.Samplers[i].Sampler)
+					if cached != nil {
+						sampler = cached
+					}
+				}
+				fb[i] = SDL.GPUTextureSamplerBinding{texture = texture, sampler = sampler}
+			}
+			SDL.BindGPUFragmentSamplers(graphics_device.RenderPass, 0, &fb[0], u32(len(fb)))
 		}
-		SDL.BindGPUFragmentSamplers(graphics_device.RenderPass, 0, &fb[0], u32(len(fb)))
 	}
 
 	for i := 0; i < vertex_info.UniformBufferCount; i += 1 {
 		uniform := material_stage_get_uniform_buffer(&command.Material.Vertex, i)
-		if len(uniform) > 0 {
-			SDL.PushGPUVertexUniformData(graphics_device.CommandBuffer, u32(i), raw_data(uniform), u32(len(uniform)))
-		} else if i == 0 {
-			SDL.PushGPUVertexUniformData(graphics_device.CommandBuffer, u32(i), raw_data(identity_matrix_4x4[:]), 64)
+		when ODIN_OS == .JS {
+			// M1 决策: 逐 draw 设 uniform(非 UBO)。顶点 slot0 = 64 字节列主序 mat4
+			if len(uniform) >= 64 {
+				fw_set_matrix4(0, u32(i), raw_data(uniform))
+			} else {
+				fw_set_matrix4(0, u32(i), raw_data(identity_matrix_4x4[:]))
+			}
+		} else {
+			if len(uniform) > 0 {
+				SDL.PushGPUVertexUniformData(graphics_device.CommandBuffer, u32(i), raw_data(uniform), u32(len(uniform)))
+			} else if i == 0 {
+				SDL.PushGPUVertexUniformData(graphics_device.CommandBuffer, u32(i), raw_data(identity_matrix_4x4[:]), 64)
+			}
 		}
 	}
 
 	for i := 0; i < fragment_info.UniformBufferCount; i += 1 {
 		uniform := material_stage_get_uniform_buffer(&command.Material.Fragment, i)
-		if len(uniform) > 0 {
-			SDL.PushGPUFragmentUniformData(graphics_device.CommandBuffer, u32(i), raw_data(uniform), u32(len(uniform)))
+		when ODIN_OS == .JS {
+			// M1: 已知着色器的片元 uniform 仅 Msdf 的 DistanceRange(4 字节 float)
+			if len(uniform) >= 4 {
+				bits := u32(uniform[0]) | (u32(uniform[1]) << 8) | (u32(uniform[2]) << 16) | (u32(uniform[3]) << 24)
+				fw_set_float(1, u32(i), transmute(f32)bits)
+			}
+		} else {
+			if len(uniform) > 0 {
+				SDL.PushGPUFragmentUniformData(graphics_device.CommandBuffer, u32(i), raw_data(uniform), u32(len(uniform)))
+			}
 		}
 	}
 
-	buffer_bindings := make([]SDL.GPUBufferBinding, len(command.VertexBuffers), context.temp_allocator)
-	for i := 0; i < len(command.VertexBuffers); i += 1 {
-		buffer_bindings[i] = SDL.GPUBufferBinding{
-			buffer = command.VertexBuffers[i].Buffer.Base.Resource,
-			offset = 0,
+	when ODIN_OS == .JS {
+		for i := 0; i < len(command.VertexBuffers); i += 1 {
+			vb := command.VertexBuffers[i].Buffer
+			fw_bind_vertex_buffer(u32(i), web_handle_u32(rawptr(vb.Base.Resource)), i32(vb.Stride))
+			attr_offset := 0
+			for element in vb.Format.Elements {
+				normalized := u32(0)
+				if element.Normalized {
+					normalized = 1
+				}
+				fw_vertex_attribute(u32(element.Index), u32(i), web_vertex_type(element.Type), normalized, i32(vb.Stride), i32(attr_offset))
+				attr_offset += vertex_type_size_in_bytes(element.Type)
+			}
 		}
+	} else {
+		buffer_bindings := make([]SDL.GPUBufferBinding, len(command.VertexBuffers), context.temp_allocator)
+		for i := 0; i < len(command.VertexBuffers); i += 1 {
+			buffer_bindings[i] = SDL.GPUBufferBinding{
+				buffer = command.VertexBuffers[i].Buffer.Base.Resource,
+				offset = 0,
+			}
+		}
+		SDL.BindGPUVertexBuffers(graphics_device.RenderPass, 0, raw_data(buffer_bindings), u32(len(buffer_bindings)))
 	}
-	SDL.BindGPUVertexBuffers(graphics_device.RenderPass, 0, raw_data(buffer_bindings), u32(len(buffer_bindings)))
 
 	if vertex_info.StorageBufferCount > 0 && len(command.VertexStorageBuffers) > 0 {
+		when ODIN_OS == .JS {
+			report_draw_failure(graphics_device, .InvalidStorageBuffer, "vertex storage buffers are not supported on web (M1)")
+			return
+		}
 		storage_count := Min(len(command.VertexStorageBuffers), vertex_info.StorageBufferCount)
 		buffers := make([]^SDL.GPUBuffer, storage_count, context.temp_allocator)
 		for i := 0; i < storage_count; i += 1 {
@@ -1323,6 +1490,10 @@ graphics_device_draw :: proc(graphics_device: ^GraphicsDevice, command: ^DrawCom
 	}
 
 	if fragment_info.StorageBufferCount > 0 && len(command.FragmentStorageBuffers) > 0 {
+		when ODIN_OS == .JS {
+			report_draw_failure(graphics_device, .InvalidStorageBuffer, "fragment storage buffers are not supported on web (M1)")
+			return
+		}
 		storage_count := Min(len(command.FragmentStorageBuffers), fragment_info.StorageBufferCount)
 		buffers := make([]^SDL.GPUBuffer, storage_count, context.temp_allocator)
 		for i := 0; i < storage_count; i += 1 {
@@ -1337,15 +1508,26 @@ graphics_device_draw :: proc(graphics_device: ^GraphicsDevice, command: ^DrawCom
 	}
 
 	if command.IndexBuffer != nil && command.IndexBuffer.Base.Resource != nil && command.IndexCount > 0 {
-		index_binding := SDL.GPUBufferBinding{
-			buffer = command.IndexBuffer.Base.Resource,
-			offset = u32(command.IndexOffset * command.IndexBuffer.Base.ElementSizeInBytes),
+		when ODIN_OS == .JS {
+			fw_bind_index_buffer(web_handle_u32(rawptr(command.IndexBuffer.Base.Resource)))
+			graphics_device.RenderPassIndexBuffer = command.IndexBuffer.Base.Resource
+			byte_offset := i32(command.IndexOffset) * web_index_type_size(command.IndexBuffer.Format)
+			fw_draw_elements(i32(command.IndexCount), web_index_type(command.IndexBuffer.Format), byte_offset, i32(Max(command.InstanceCount, 1)))
+		} else {
+			index_binding := SDL.GPUBufferBinding{
+				buffer = command.IndexBuffer.Base.Resource,
+				offset = u32(command.IndexOffset * command.IndexBuffer.Base.ElementSizeInBytes),
+			}
+			SDL.BindGPUIndexBuffer(graphics_device.RenderPass, index_binding, index_format_to_sdl(command.IndexBuffer.Format))
+			graphics_device.RenderPassIndexBuffer = command.IndexBuffer.Base.Resource
+			SDL.DrawGPUIndexedPrimitives(graphics_device.RenderPass, u32(command.IndexCount), u32(Max(command.InstanceCount, 1)), 0, i32(command.VertexOffset), 0)
 		}
-		SDL.BindGPUIndexBuffer(graphics_device.RenderPass, index_binding, index_format_to_sdl(command.IndexBuffer.Format))
-		graphics_device.RenderPassIndexBuffer = command.IndexBuffer.Base.Resource
-		SDL.DrawGPUIndexedPrimitives(graphics_device.RenderPass, u32(command.IndexCount), u32(Max(command.InstanceCount, 1)), 0, i32(command.VertexOffset), 0)
 	} else if command.VertexCount > 0 {
-		SDL.DrawGPUPrimitives(graphics_device.RenderPass, u32(command.VertexCount), u32(Max(command.InstanceCount, 1)), u32(command.VertexOffset), 0)
+		when ODIN_OS == .JS {
+			fw_draw_arrays(i32(command.VertexCount), i32(command.VertexOffset), i32(Max(command.InstanceCount, 1)))
+		} else {
+			SDL.DrawGPUPrimitives(graphics_device.RenderPass, u32(command.VertexCount), u32(Max(command.InstanceCount, 1)), u32(command.VertexOffset), 0)
+		}
 	}
 }
 
@@ -1387,17 +1569,22 @@ GraphicsDeviceClear :: proc{graphics_device_clear_color, graphics_device_clear_m
 init_default_batch_material :: proc(material: ^Material, vertex_shader: ^Shader, fragment_shader: ^Shader, graphics_device: ^GraphicsDevice) {
 	vertex_code: []u8 = nil
 	fragment_code: []u8 = nil
-	#partial switch graphics_device.Driver {
-	case .Private, .Vulkan:
-		vertex_code = batcher_vertex_spv
-		fragment_code = batcher_fragment_spv
-	case .D3D12:
-		vertex_code = batcher_vertex_dxil
-		fragment_code = batcher_fragment_dxil
-	case .Metal:
-		vertex_code = batcher_vertex_msl
-		fragment_code = batcher_fragment_msl
-	case .None:
+	when ODIN_OS == .JS {
+		vertex_code = batcher_vertex_glsl
+		fragment_code = batcher_fragment_glsl
+	} else {
+		#partial switch graphics_device.Driver {
+		case .Private, .Vulkan:
+			vertex_code = batcher_vertex_spv
+			fragment_code = batcher_fragment_spv
+		case .D3D12:
+			vertex_code = batcher_vertex_dxil
+			fragment_code = batcher_fragment_dxil
+		case .Metal:
+			vertex_code = batcher_vertex_msl
+			fragment_code = batcher_fragment_msl
+		case .None:
+		}
 	}
 
 	vertex_info := ShaderCreateInfo{
@@ -1427,11 +1614,16 @@ InitDefaultBatchMaterial :: init_default_batch_material
 init_default_textured_material :: proc(material: ^Material, vertex_shader: ^Shader, fragment_shader: ^Shader, graphics_device: ^GraphicsDevice) {
 	vertex_code: []u8 = nil
 	fragment_code: []u8 = nil
-	#partial switch graphics_device.Driver {
-	case .Private, .Vulkan: vertex_code = textured_vertex_spv; fragment_code = textured_fragment_spv
-	case .D3D12: vertex_code = textured_vertex_dxil; fragment_code = textured_fragment_dxil
-	case .Metal: vertex_code = textured_vertex_msl; fragment_code = textured_fragment_msl
-	case .None:
+	when ODIN_OS == .JS {
+		vertex_code = textured_vertex_glsl
+		fragment_code = textured_fragment_glsl
+	} else {
+		#partial switch graphics_device.Driver {
+		case .Private, .Vulkan: vertex_code = textured_vertex_spv; fragment_code = textured_fragment_spv
+		case .D3D12: vertex_code = textured_vertex_dxil; fragment_code = textured_fragment_dxil
+		case .Metal: vertex_code = textured_vertex_msl; fragment_code = textured_fragment_msl
+		case .None:
+		}
 	}
 	shader_init(vertex_shader, graphics_device, ShaderCreateInfo{Stage=.Vertex, Code=vertex_code, SamplerCount=0, UniformBufferCount=1, StorageBufferCount=0, EntryPoint="vertex_main"}, "TexturedVertex")
 	shader_init(fragment_shader, graphics_device, ShaderCreateInfo{Stage=.Fragment, Code=fragment_code, SamplerCount=1, UniformBufferCount=0, StorageBufferCount=0, EntryPoint="fragment_main"}, "TexturedFragment")
@@ -1441,11 +1633,16 @@ init_default_textured_material :: proc(material: ^Material, vertex_shader: ^Shad
 init_default_msdf_material :: proc(material: ^Material, vertex_shader: ^Shader, fragment_shader: ^Shader, graphics_device: ^GraphicsDevice) {
 	vertex_code: []u8 = nil
 	fragment_code: []u8 = nil
-	#partial switch graphics_device.Driver {
-	case .Private, .Vulkan: vertex_code = msdf_vertex_spv; fragment_code = msdf_fragment_spv
-	case .D3D12: vertex_code = msdf_vertex_dxil; fragment_code = msdf_fragment_dxil
-	case .Metal: vertex_code = msdf_vertex_msl; fragment_code = msdf_fragment_msl
-	case .None:
+	when ODIN_OS == .JS {
+		vertex_code = msdf_vertex_glsl
+		fragment_code = msdf_fragment_glsl
+	} else {
+		#partial switch graphics_device.Driver {
+		case .Private, .Vulkan: vertex_code = msdf_vertex_spv; fragment_code = msdf_fragment_spv
+		case .D3D12: vertex_code = msdf_vertex_dxil; fragment_code = msdf_fragment_dxil
+		case .Metal: vertex_code = msdf_vertex_msl; fragment_code = msdf_fragment_msl
+		case .None:
+		}
 	}
 	shader_init(vertex_shader, graphics_device, ShaderCreateInfo{Stage=.Vertex, Code=vertex_code, SamplerCount=0, UniformBufferCount=1, StorageBufferCount=0, EntryPoint="vertex_main"}, "MsdfVertex")
 	shader_init(fragment_shader, graphics_device, ShaderCreateInfo{Stage=.Fragment, Code=fragment_code, SamplerCount=1, UniformBufferCount=1, StorageBufferCount=0, EntryPoint="fragment_main"}, "MsdfFragment")

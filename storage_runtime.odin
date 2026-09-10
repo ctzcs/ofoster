@@ -5,10 +5,10 @@ import "core:c"
 import "core:fmt"
 import "core:bytes"
 import zlib "core:compress/zlib"
-import os "core:os"
-import filepath "core:path/filepath"
 import "core:strings"
 import SDL "vendor:sdl3"
+// core:os 与 core:path/filepath 分别经 storage_os_* 与 storage_path_* 平台层使用
+// (两者在 js 目标不可用)
 
 DialogResult :: struct {
 	Files: []string,
@@ -56,73 +56,48 @@ FileSystem :: struct {
 
 storage_join_path :: proc(container: ^StorageContainer, path: string) -> string {
 	if container.Root == "" {
-		cleaned, _ := filepath.clean(path, context.temp_allocator)
-		return cleaned
+		return storage_path_clean(path)
 	}
 	if strings.trim_space(path) == "" {
 		return container.Root
 	}
-	joined, _ := filepath.join({container.Root, path}, context.temp_allocator)
-	cleaned, _ := filepath.clean(joined, context.temp_allocator)
-	return cleaned
+	joined := storage_path_join({container.Root, path})
+	return storage_path_clean(joined)
 }
 
 storage_exists :: proc(container: ^StorageContainer, path: string) -> bool {
-	return os.exists(storage_join_path(container, path))
+	return storage_os_exists(storage_join_path(container, path))
 }
 
 storage_file_exists :: proc(container: ^StorageContainer, path: string) -> bool {
 	full := storage_join_path(container, path)
-	return os.exists(full) && !os.is_directory(full)
+	return storage_os_exists(full) && !storage_os_is_directory(full)
 }
 
 storage_directory_exists :: proc(container: ^StorageContainer, path: string) -> bool {
-	return os.is_directory(storage_join_path(container, path))
+	return storage_os_is_directory(storage_join_path(container, path))
 }
 
 storage_enumerate_directory :: proc(container: ^StorageContainer, path: string, allocator := context.allocator) -> []string {
-	full := storage_join_path(container, path)
-	infos, err := os.read_all_directory_by_path(full, allocator)
-	if err != nil {
-		return nil
-	}
-	defer os.file_info_slice_delete(infos, allocator)
-
-	result := make([dynamic]string, 0, len(infos), allocator)
-	for info in infos {
-		name, clone_err := strings.clone(info.name, allocator)
-		if clone_err != nil {
-			continue
-		}
-		append(&result, name)
-	}
-	return result[:]
+	return storage_os_enumerate(storage_join_path(container, path), allocator)
 }
 
 storage_create_directory :: proc(container: ^StorageContainer, path: string) -> bool {
 	if !container.Writable {
 		return false
 	}
-	return os.make_directory_all(storage_join_path(container, path)) == nil
+	return storage_os_make_directory_all(storage_join_path(container, path))
 }
 
 storage_remove :: proc(container: ^StorageContainer, path: string) -> bool {
 	if !container.Writable {
 		return false
 	}
-	full := storage_join_path(container, path)
-	if os.is_directory(full) {
-		return os.remove_all(full) == nil
-	}
-	return os.remove(full) == nil
+	return storage_os_remove(storage_join_path(container, path))
 }
 
 storage_read_all_bytes :: proc(container: ^StorageContainer, path: string, allocator := context.allocator) -> []byte {
-	data, err := os.read_entire_file(storage_join_path(container, path), allocator)
-	if err != nil {
-		return nil
-	}
-	return data
+	return storage_os_read_file(storage_join_path(container, path), allocator)
 }
 
 storage_read_all_text :: proc(container: ^StorageContainer, path: string, allocator := context.allocator) -> string {
@@ -138,11 +113,11 @@ storage_write_all_bytes :: proc(container: ^StorageContainer, path: string, data
 		return false
 	}
 	full := storage_join_path(container, path)
-	parent, _ := filepath.split(full)
+	parent, _ := storage_path_split(full)
 	if parent != "" {
-		_ = os.make_directory_all(parent)
+		_ = storage_os_make_directory_all(parent)
 	}
-	return os.write_entire_file(full, data) == nil
+	return storage_os_write_file(full, data)
 }
 
 storage_write_all_text :: proc(container: ^StorageContainer, path, data: string) -> bool {
@@ -239,8 +214,8 @@ content_storage_as_container :: proc(storage: ^ContentStorage) -> ^StorageContai
 zip_storage_init :: proc(storage: ^ZipStorage, root: string) {
 	storage.Container = StorageContainer{Root = root, Writable = false}
 	storage.Entries = make(map[string][dynamic]u8)
-	data, err := os.read_entire_file(root, context.temp_allocator)
-	if err != nil { return }
+	data := storage_os_read_file(root, context.temp_allocator)
+	if data == nil { return }
 	read16 := proc(data: []u8, at: int) -> u16 { return u16(data[at]) | u16(data[at+1])<<8 }
 	read32 := proc(data: []u8, at: int) -> u32 { return u32(data[at]) | u32(data[at+1])<<8 | u32(data[at+2])<<16 | u32(data[at+3])<<24 }
 	// Locate the end-of-central-directory record from the end of the file.
@@ -333,29 +308,34 @@ file_system_open_user_storage :: proc(fs: ^FileSystem) -> StorageContainer {
 	if fs.App != nil {
 		root = fs.App.UserPath
 	}
-	if root == "" {
-		pref_path := SDL.GetPrefPath("", to_cstring(fs.App.Name))
-		if pref_path != nil {
-			root = string(cstring(pref_path))
+	when ODIN_OS != .JS {
+		if root == "" {
+			pref_path := SDL.GetPrefPath("", to_cstring(fs.App.Name))
+			if pref_path != nil {
+				root = string(cstring(pref_path))
+			}
+		}
+		if root != "" {
+			_ = storage_os_make_directory_all(root)
 		}
 	}
-	if root != "" {
-		_ = os.make_directory_all(root)
-	}
+	// web: UserPath 恒为虚拟前缀(/foster/<app>/), 由 storage_os_web 落到 localStorage
 	return StorageContainer{Root = root, Writable = true}
 }
 
 file_system_open_title_storage :: proc(fs: ^FileSystem) -> StorageContainer {
+	when ODIN_OS == .JS {
+		// web: 无基路径概念(资产内嵌 wasm 或走虚拟 FS), 标题存储指向虚拟 FS 根
+		_ = fs
+		return StorageContainer{Root = "", Writable = false}
+	}
 	base_path := SDL.GetBasePath()
 	root := ""
 	if base_path != nil {
 		root = string(base_path)
 	}
 	if root == "" {
-		dir, err := os.get_working_directory(context.temp_allocator)
-		if err == nil {
-			root = dir
-		}
+		root = storage_os_working_directory(context.temp_allocator)
 	}
 	return StorageContainer{Root = root, Writable = false}
 }

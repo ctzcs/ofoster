@@ -17,6 +17,19 @@ graphics_device_destroy_resource :: proc(graphics_device: ^GraphicsDevice, kind:
 		return
 	}
 
+	when ODIN_OS == .JS {
+		handle := web_handle_u32(resource)
+		switch kind {
+		case .Texture: fw_gl_release_texture(handle)
+		case .Shader: fw_gl_release_shader(handle)
+		case .Buffer: fw_gl_release_buffer(handle)
+		case .Sampler: fw_gl_release_sampler(handle)
+		case .Pipeline: fw_gl_release_pipeline(handle)
+		case .None:
+		}
+		return
+	}
+
 	device := graphics_device.Device
 
 	#partial switch kind {
@@ -38,6 +51,12 @@ GraphicsDeviceDestroyResource :: graphics_device_destroy_resource
 
 graphics_device_upload_to_buffer :: proc(graphics_device: ^GraphicsDevice, buffer: ^SDL.GPUBuffer, data: rawptr, data_size: u32, dest_offset: u32) {
 	if graphics_device == nil || graphics_device.Device == nil || buffer == nil || data == nil || data_size == 0 {
+		return
+	}
+
+	when ODIN_OS == .JS {
+		// Web: 立即式 bufferSubData(句柄表记录缓冲类型)
+		fw_gl_upload_buffer(web_handle_u32(rawptr(buffer)), data, i32(data_size), i32(dest_offset))
 		return
 	}
 
@@ -156,6 +175,28 @@ texture_init_ex :: proc(tex: ^Texture, graphics_device: ^GraphicsDevice, width, 
 		panic("GraphicsDevice is nil")
 	}
 
+	when ODIN_OS == .JS {
+		handle := fw_gl_create_texture(i32(width), i32(height))
+		if handle == 0 {
+			panic("foster_web: create_texture failed")
+		}
+		tex.GraphicsDevice = graphics_device
+		tex.Name = name
+		tex.Width = width
+		tex.Height = height
+		tex.Format = format
+		tex.SampleCount = sample_count
+		tex.IsTargetAttachment = is_target_attachment
+		tex.Resource = cast(^SDL.GPUTexture)(web_handle_ptr(handle))
+		tex.ResolveResource = nil
+		tex.Flags = TextureFlags{}
+		delete(tex.Pixels)
+		tex.Pixels = nil
+		resize(&tex.Pixels, width * height * texture_format_size(format))
+		tex.Disposed = false
+		return
+	}
+
 	sdl_format := texture_format_to_sdl(format)
 	info := SDL.GPUTextureCreateInfo{
 		type = .D2,
@@ -227,10 +268,18 @@ texture_dispose :: proc(tex: ^Texture) {
 		return
 	}
 	if tex.GraphicsDevice != nil && tex.GraphicsDevice.Device != nil && tex.Resource != nil && !tex.IsTargetAttachment {
-		SDL.ReleaseGPUTexture(tex.GraphicsDevice.Device, tex.Resource)
+		when ODIN_OS == .JS {
+			fw_gl_release_texture(web_handle_u32(rawptr(tex.Resource)))
+		} else {
+			SDL.ReleaseGPUTexture(tex.GraphicsDevice.Device, tex.Resource)
+		}
 	}
 	if tex.GraphicsDevice != nil && tex.GraphicsDevice.Device != nil && tex.ResolveResource != nil {
-		SDL.ReleaseGPUTexture(tex.GraphicsDevice.Device, tex.ResolveResource)
+		when ODIN_OS == .JS {
+			fw_gl_release_texture(web_handle_u32(rawptr(tex.ResolveResource)))
+		} else {
+			SDL.ReleaseGPUTexture(tex.GraphicsDevice.Device, tex.ResolveResource)
+		}
 	}
 	tex.Resource = nil
 	tex.ResolveResource = nil
@@ -259,6 +308,14 @@ texture_set_data :: proc(tex: ^Texture, data: rawptr, length: int) {
 	mem_size := texture_memory_size(tex)
 	if length < mem_size {
 		panic("Data Buffer is smaller than the Size of the Texture")
+	}
+
+	when ODIN_OS == .JS {
+		if mem_size > 0 {
+			fw_gl_upload_texture(web_handle_u32(rawptr(tex.Resource)), i32(tex.Width), i32(tex.Height), data, i32(mem_size))
+			mem.copy(raw_data(tex.Pixels[:]), data, mem_size)
+		}
+		return
 	}
 
 	device := tex.GraphicsDevice.Device
@@ -315,6 +372,11 @@ TextureSampleResource :: texture_sample_resource
 // Returns native texel bits in the texture's format; the caller decodes them.
 texture_download_data :: proc(tex: ^Texture, allocator := context.allocator) -> []byte {
 	if tex == nil || tex.Disposed || tex.GraphicsDevice == nil || tex.GraphicsDevice.Device == nil || tex.Resource == nil { return nil }
+	when ODIN_OS == .JS {
+		// Web: GPU→CPU 读回需要 FBO 桥, M1 范围外; texture_get_data 会退回 CPU 侧像素副本
+		_ = allocator
+		return nil
+	}
 	mem_size := texture_memory_size(tex)
 	if mem_size <= 0 { return nil }
 	transfer := SDL.CreateGPUTransferBuffer(tex.GraphicsDevice.Device, SDL.GPUTransferBufferCreateInfo{usage = .DOWNLOAD, size = u32(mem_size), props = 0})
@@ -435,6 +497,34 @@ shader_init :: proc(shader: ^Shader, graphics_device: ^GraphicsDevice, create_in
 	entrypoint := create_info.EntryPoint
 	if entrypoint == "" {
 		entrypoint = "main"
+	}
+
+	when ODIN_OS == .JS {
+		if create_info.Stage == .Compute {
+			panic("foster_web: compute shaders are not supported on web (M1 非目标)")
+		}
+		stage := u32(1)
+		if create_info.Stage == .Vertex {
+			stage = 0
+		}
+		code := create_info.Code
+		if len(code) == 0 || &code[0] == nil {
+			panic("foster_web: shader code is empty")
+		}
+		handle := fw_gl_create_shader(stage, &code[0], i32(len(code)))
+		if handle == 0 {
+			panic("foster_web: GLSL shader compile failed (详见页面日志)")
+		}
+		shader.GraphicsDevice = graphics_device
+		shader.Stage = create_info.Stage
+		shader.Name = name
+		shader.CreateInfo = create_info
+		shader.Resource = cast(^SDL.GPUShader)(web_handle_ptr(handle))
+		shader.ComputeResource = nil
+		delete(shader.PipelineHashes)
+		shader.PipelineHashes = nil
+		shader.Disposed = false
+		return
 	}
 
 	sdl_stage := shader_stage_to_sdl(create_info.Stage)
@@ -579,6 +669,34 @@ graphics_buffer_init :: proc(buf: ^GraphicsBuffer, graphics_device: ^GraphicsDev
 		panic("ElementSizeInBytes must be > 0")
 	}
 
+	initial_size := element_size_in_bytes
+	if initial_size < 256 {
+		initial_size = 256
+	}
+
+	when ODIN_OS == .JS {
+		type_code := u32(0)
+		switch buffer_type {
+		case .Vertex: type_code = 0
+		case .Index: type_code = 1
+		case .Storage: type_code = 2
+		}
+		handle := fw_gl_create_buffer(type_code, i32(initial_size))
+		if handle == 0 {
+			panic("foster_web: create_buffer failed")
+		}
+		buf.GraphicsDevice = graphics_device
+		buf.Name = name
+		buf.ElementSizeInBytes = element_size_in_bytes
+		buf.Count = 0
+		buf.ByteSize = initial_size
+		buf.Type = buffer_type
+		buf.IndexFormat = index_format
+		buf.Resource = cast(^SDL.GPUBuffer)(web_handle_ptr(handle))
+		buf.Disposed = false
+		return
+	}
+
 	usage: SDL.GPUBufferUsageFlags = {}
 	#partial switch buffer_type {
 	case .Vertex:
@@ -589,10 +707,6 @@ graphics_buffer_init :: proc(buf: ^GraphicsBuffer, graphics_device: ^GraphicsDev
 		usage = SDL.GPUBufferUsageFlags{.GRAPHICS_STORAGE_READ}
 	}
 
-	initial_size := element_size_in_bytes
-	if initial_size < 256 {
-		initial_size = 256
-	}
 	info := SDL.GPUBufferCreateInfo{
 		usage = usage,
 		size = u32(initial_size),
@@ -629,6 +743,26 @@ graphics_buffer_ensure_size :: proc(buf: ^GraphicsBuffer, required_bytes: int) {
 	}
 	for next_size < required_bytes {
 		next_size *= 2
+	}
+
+	when ODIN_OS == .JS {
+		if buf.Resource != nil {
+			fw_gl_release_buffer(web_handle_u32(rawptr(buf.Resource)))
+			buf.Resource = nil
+		}
+		type_code := u32(0)
+		switch buf.Type {
+		case .Vertex: type_code = 0
+		case .Index: type_code = 1
+		case .Storage: type_code = 2
+		}
+		handle := fw_gl_create_buffer(type_code, i32(next_size))
+		if handle == 0 {
+			panic("foster_web: create_buffer (resize) failed")
+		}
+		buf.Resource = cast(^SDL.GPUBuffer)(web_handle_ptr(handle))
+		buf.ByteSize = next_size
+		return
 	}
 
 	usage: SDL.GPUBufferUsageFlags = {}
@@ -690,7 +824,11 @@ graphics_buffer_dispose :: proc(buf: ^GraphicsBuffer) {
 		return
 	}
 	if buf.GraphicsDevice != nil && buf.GraphicsDevice.Device != nil && buf.Resource != nil {
-		SDL.ReleaseGPUBuffer(buf.GraphicsDevice.Device, buf.Resource)
+		when ODIN_OS == .JS {
+			fw_gl_release_buffer(web_handle_u32(rawptr(buf.Resource)))
+		} else {
+			SDL.ReleaseGPUBuffer(buf.GraphicsDevice.Device, buf.Resource)
+		}
 	}
 	buf.Resource = nil
 	buf.Disposed = true

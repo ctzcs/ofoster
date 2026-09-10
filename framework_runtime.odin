@@ -3,10 +3,10 @@ package foster_framework
 import "core:c"
 import "core:fmt"
 import "core:mem"
-import os "core:os"
 import coretime "core:time"
 import "core:strings"
 import SDL "vendor:sdl3"
+// core:os 经 platform_thread_native/web.odin 间接使用(js 目标无 core:os)
 
 Point2 :: struct {
 	X: int,
@@ -241,6 +241,15 @@ identity_matrix_4x4 : [16]f32 = [16]f32{
 }
 
 create_device :: proc(graphics_device: ^GraphicsDevice, flags: AppFlags) {
+	when ODIN_OS == .JS {
+		// Web: 无 SDL_GPU 设备, Device 用非 nil 占位使现有 nil 守卫成立
+		graphics_device.Device = cast(^SDL.GPUDevice)&web_device_placeholder
+		graphics_device.Disposed = false
+		graphics_device.VSync = true
+		graphics_device.ClearColor = ColorToSDL(CornflowerBlue)
+		graphics_device.BackbufferSampleCount = .One
+		return
+	}
 	_ = flags
 	driver_name: cstring = nil
 	#partial switch graphics_device.RequestedDriver {
@@ -274,6 +283,11 @@ create_device :: proc(graphics_device: ^GraphicsDevice, flags: AppFlags) {
 }
 
 destroy_device :: proc(graphics_device: ^GraphicsDevice) {
+	when ODIN_OS == .JS {
+		graphics_device.Device = nil
+		graphics_device.Disposed = true
+		return
+	}
 	if graphics_device.Device != nil {
 		SDL.DestroyGPUDevice(graphics_device.Device)
 		graphics_device.Device = nil
@@ -282,6 +296,22 @@ destroy_device :: proc(graphics_device: ^GraphicsDevice) {
 }
 
 startup_graphics_device :: proc(graphics_device: ^GraphicsDevice, window: ^SDL.Window) {
+	when ODIN_OS == .JS {
+		// Web: GL 上下文由 foster.js 在 canvas 上创建, 无设备声明/交换链参数
+		graphics_device.Window = window // JS 下恒为 nil
+		graphics_device.Driver = .Private // 内部 WebGL2 后端
+		graphics_device.SupportsMailbox = false
+		graphics_device.SwapchainFormat = .R8G8B8A8_UNORM
+
+		graphics_device.WindowRenderTarget = Target{}
+		graphics_device.WindowRenderTarget.GraphicsDevice = graphics_device
+		graphics_device.WindowRenderTarget.Name = "WindowSwapchain"
+		append(&graphics_device.WindowRenderTarget.Attachments, Texture{GraphicsDevice = graphics_device, Format = .Color})
+		graphics_device.HasWindowRenderTarget = true
+
+		default_resources_init(graphics_device)
+		return
+	}
 	graphics_device.Window = window
 	driver_name := string(SDL.GetGPUDeviceDriver(graphics_device.Device))
 	switch driver_name {
@@ -321,6 +351,12 @@ startup_graphics_device :: proc(graphics_device: ^GraphicsDevice, window: ^SDL.W
 }
 
 shutdown_graphics_device :: proc(graphics_device: ^GraphicsDevice) {
+	when ODIN_OS == .JS {
+		// M0: JS 路径未创建任何默认资源与 GPU 对象, 无需释放; M1+ 的 GL 资源释放在这里接
+		graphics_device.Window = nil
+		graphics_device.Driver = .None
+		return
+	}
 	if graphics_device.Device != nil && graphics_device.Window != nil {
 		_ = SDL.WaitForGPUIdle(graphics_device.Device)
 		if graphics_device.UploadStaging != nil {
@@ -347,6 +383,38 @@ present :: proc(graphics_device: ^GraphicsDevice) {
 }
 
 begin_frame :: proc(graphics_device: ^GraphicsDevice) -> bool {
+	when ODIN_OS == .JS {
+		if graphics_device.InFrame {
+			return false
+		}
+		if graphics_device.Device == nil {
+			return false
+		}
+
+		pixel_size := web_window_size_in_pixels()
+		graphics_device.CommandBuffer = cast(^SDL.GPUCommandBuffer)&web_cmd_placeholder
+		graphics_device.RenderPass = nil
+		graphics_device.SwapchainTexture = nil
+		graphics_device.SwapchainWidth = u32(pixel_size.X)
+		graphics_device.SwapchainHeight = u32(pixel_size.Y)
+		graphics_device.InFrame = true
+		graphics_device.RenderPassTarget = {}
+		graphics_device.RenderPassTargetSize = {}
+		graphics_device.RenderPassPipeline = nil
+		graphics_device.RenderPassIndexBuffer = nil
+		graphics_device.HasRenderPassViewport = false
+		graphics_device.HasRenderPassScissor = false
+		graphics_device.UploadStagingCursor = 0
+		if graphics_device.HasWindowRenderTarget {
+			graphics_device.WindowRenderTarget.Width = pixel_size.X
+			graphics_device.WindowRenderTarget.Height = pixel_size.Y
+			graphics_device.WindowRenderTarget.Bounds = RectInt{0, 0, pixel_size.X, pixel_size.Y}
+		}
+		// WebGL preserveDrawingBuffer 保留上一帧; 桌面交换链内容不保证保留(discard 语义)。
+		// 这里先清一次以对齐桌面语义, 防止游戏未 clear 的帧残留旧画面。
+		fw_clear(0, 0, 0, 0)
+		return true
+	}
 	if graphics_device.InFrame {
 		return false
 	}
@@ -394,6 +462,24 @@ begin_frame :: proc(graphics_device: ^GraphicsDevice) -> bool {
 
 end_frame :: proc(graphics_device: ^GraphicsDevice) {
 	if !graphics_device.InFrame {
+		return
+	}
+
+	when ODIN_OS == .JS {
+		graphics_device.RenderPass = nil
+		graphics_device.CommandBuffer = nil
+		graphics_device.SwapchainTexture = nil
+		graphics_device.SwapchainWidth = 0
+		graphics_device.SwapchainHeight = 0
+		graphics_device.InFrame = false
+		graphics_device.RenderPassTarget = {}
+		graphics_device.RenderPassTargetSize = {}
+		graphics_device.RenderPassPipeline = nil
+		graphics_device.RenderPassIndexBuffer = nil
+		graphics_device.HasRenderPassViewport = false
+		graphics_device.HasRenderPassScissor = false
+		fw_end_pass() // 复位 GL 状态(剪刀等)
+		fw_present()  // WebGL2: rAF 合成即 present
 		return
 	}
 
@@ -937,6 +1023,18 @@ window_init :: proc(window: ^Window, app: ^App, graphics_device: ^GraphicsDevice
 	window.GraphicsDevice = graphics_device
 	window.Title = config.WindowTitle
 
+	when ODIN_OS == .JS {
+		// canvas 即窗口: foster.js 定位 canvas、创建 WebGL2 上下文并设置标题
+		title := config.WindowTitle
+		title_bytes := transmute([]byte)title
+		if !fw_init(&title_bytes[0], i32(len(title_bytes))) {
+			panic("foster_web init failed: canvas 或 WebGL2 上下文不可用")
+		}
+		window.Handle = nil
+		window.ID = 1
+		return
+	}
+
 	flags := SDL.WINDOW_HIGH_PIXEL_DENSITY + SDL.WINDOW_HIDDEN
 	if config.Fullscreen {
 		flags += SDL.WINDOW_FULLSCREEN
@@ -954,6 +1052,11 @@ window_init :: proc(window: ^Window, app: ^App, graphics_device: ^GraphicsDevice
 }
 
 window_close :: proc(window: ^Window) {
+	when ODIN_OS == .JS {
+		// canvas 生命周期由页面管理
+		_ = window
+		return
+	}
 	if window.Handle != nil {
 		SDL.DestroyWindow(window.Handle)
 		window.Handle = nil
@@ -961,6 +1064,10 @@ window_close :: proc(window: ^Window) {
 }
 
 window_show :: proc(window: ^Window) {
+	when ODIN_OS == .JS {
+		_ = window // canvas 始终可见
+		return
+	}
 	if window.Handle == nil {
 		return
 	}
@@ -971,18 +1078,30 @@ window_show :: proc(window: ^Window) {
 }
 
 window_hide :: proc(window: ^Window) {
+	when ODIN_OS == .JS {
+		_ = window
+		return
+	}
 	if window.Handle != nil {
 		_ = SDL.HideWindow(window.Handle)
 	}
 }
 
 window_focus :: proc(window: ^Window) {
+	when ODIN_OS == .JS {
+		_ = window
+		return
+	}
 	if window.Handle != nil {
 		_ = SDL.RaiseWindow(window.Handle)
 	}
 }
 
 window_size :: proc(window: ^Window) -> Point2 {
+	when ODIN_OS == .JS {
+		_ = window
+		return web_window_size()
+	}
 	if window.Handle == nil {
 		return Point2Zero
 	}
@@ -995,6 +1114,10 @@ window_size :: proc(window: ^Window) -> Point2 {
 }
 
 window_size_in_pixels :: proc(window: ^Window) -> Point2 {
+	when ODIN_OS == .JS {
+		_ = window
+		return web_window_size_in_pixels()
+	}
 	if window.Handle == nil {
 		return Point2Zero
 	}
@@ -1019,6 +1142,12 @@ window_set_position :: proc(window: ^Window, value: Point2) {
 }
 
 window_set_size :: proc(window: ^Window, value: Point2) {
+	when ODIN_OS == .JS {
+		// Web: canvas 布局由页面控制, 逻辑尺寸跟随视口, 忽略显式设置
+		_ = window
+		_ = value
+		return
+	}
 	if window.Handle != nil {
 		_ = SDL.SetWindowSize(window.Handle, c.int(value.X), c.int(value.Y))
 	}
@@ -1033,6 +1162,10 @@ window_focused :: proc(window: ^Window) -> bool {
 }
 
 window_fullscreen :: proc(window: ^Window) -> bool {
+	when ODIN_OS == .JS {
+		_ = window
+		return fw_is_fullscreen() != 0
+	}
 	if window.Handle == nil {
 		return false
 	}
@@ -1040,6 +1173,12 @@ window_fullscreen :: proc(window: ^Window) -> bool {
 }
 
 window_set_fullscreen :: proc(window: ^Window, value: bool) {
+	when ODIN_OS == .JS {
+		// 全屏 = 页面 Fullscreen API(需用户手势上下文, 由按键路径调用时自然满足)
+		_ = window
+		fw_set_fullscreen(value ? 1 : 0)
+		return
+	}
 	if window.Handle != nil {
 		_ = SDL.SetWindowFullscreen(window.Handle, value)
 	}
@@ -1108,6 +1247,11 @@ window_set_mouse_visible :: proc(window: ^Window, enabled: bool) {
 }
 
 window_set_mouse_relative_mode :: proc(window: ^Window, enabled: bool) {
+	when ODIN_OS == .JS {
+		// Pointer Lock API; 锁定时的增量由 movementX/Y 累积成虚拟坐标
+		fw_set_mouse_relative(enabled ? 1 : 0)
+		return
+	}
 	if window.Handle == nil {
 		return
 	}
@@ -1233,28 +1377,37 @@ init_app :: proc(app: ^App, config: AppConfig) {
 	app.Name = config.ApplicationName
 	app.UpdateMode = config.UpdateMode
 	app.GraphicsDevice.RequestedDriver = config.PreferredGraphicsDriver
-	app.main_thread_id = os.get_current_thread_id()
+	app.main_thread_id = platform_current_thread_id()
 
 	fmt.println("Foster:", version_string())
-	fmt.println("SDL:", sdl_version_string())
+	when ODIN_OS == .JS {
+		fmt.println("SDL: web backend (js_wasm32)")
+	} else {
+		fmt.println("SDL:", sdl_version_string())
+		_ = SDL.SetHint(SDL.HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1")
 
-	_ = SDL.SetHint(SDL.HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1")
-
-	init_flags := SDL.INIT_VIDEO + SDL.INIT_EVENTS + SDL.INIT_JOYSTICK + SDL.INIT_GAMEPAD
-	if !SDL.Init(init_flags) {
-		panic(create_error_from_sdl("SDL_Init"))
+		init_flags := SDL.INIT_VIDEO + SDL.INIT_EVENTS + SDL.INIT_JOYSTICK + SDL.INIT_GAMEPAD
+		if !SDL.Init(init_flags) {
+			panic(create_error_from_sdl("SDL_Init"))
+		}
 	}
 
 	create_device(&app.GraphicsDevice, config.Flags)
 	window_init(&app.Window, app, &app.GraphicsDevice, config)
 	startup_graphics_device(&app.GraphicsDevice, app.Window.Handle)
-	graphics_device_init_debug_draw(&app.GraphicsDevice)
+	when ODIN_OS != .JS {
+		graphics_device_init_debug_draw(&app.GraphicsDevice)
+	}
 	file_system_init(&app.FileSystem, app)
 	input_init(&app.Input, app)
 
-	user_path := SDL.GetPrefPath("", to_cstring(config.ApplicationName))
-	if user_path != nil {
-		app.UserPath = string(cstring(user_path))
+	when ODIN_OS == .JS {
+		app.UserPath = web_user_path(app.Name) // M4: 接虚拟文件系统
+	} else {
+		user_path := SDL.GetPrefPath("", to_cstring(config.ApplicationName))
+		if user_path != nil {
+			app.UserPath = string(cstring(user_path))
+		}
 	}
 }
 
@@ -1270,12 +1423,14 @@ dispose_app :: proc(app: ^App) {
 	input_close_devices(&app.Input)
 	window_close(&app.Window)
 	destroy_device(&app.GraphicsDevice)
-	SDL.Quit()
+	when ODIN_OS != .JS {
+		SDL.Quit()
+	}
 	app.Disposed = true
 }
 
 is_main_thread :: proc(app: ^App) -> bool {
-	return os.get_current_thread_id() == app.main_thread_id
+	return platform_current_thread_id() == app.main_thread_id
 }
 
 run_on_main_thread :: proc(app: ^App, action: AppCallback) {
@@ -1300,6 +1455,57 @@ drain_main_thread_queue :: proc(app: ^App) {
 }
 
 poll_events :: proc(app: ^App) {
+	when ODIN_OS == .JS {
+		// 事件来源替换为 foster.js 的 DOM 事件队列; 窗口事件映射为 SDL.EventType
+		// 枚举值复用 window_on_event(纯枚举分派, 无 SDL 调用); 输入事件直接派发
+		// 到现有 input_* 入口(Keys 值与 SDL scancode 一致, 无需伪造 SDL.Event)
+		web_event: WebEvent
+		for fw_poll_event(&web_event) {
+			#partial switch web_event.Kind {
+			case .Quit:
+				if app.Running && !app.Exiting {
+					if app.OnExitRequested != nil {
+						app.OnExitRequested(app)
+					} else {
+						exit(app)
+					}
+				}
+			case .WindowResized:
+				window_on_event(&app.Window, .WINDOW_RESIZED)
+			case .WindowFocusGained:
+				window_on_event(&app.Window, .WINDOW_FOCUS_GAINED)
+			case .WindowFocusLost:
+				window_on_event(&app.Window, .WINDOW_FOCUS_LOST)
+			case .KeyDown:
+				if web_event.B == 0 {
+					input_key(&app.Input, cast(Keys)web_event.A, true, app.Time.Elapsed)
+				}
+			case .KeyUp:
+				if web_event.B == 0 {
+					input_key(&app.Input, cast(Keys)web_event.A, false, app.Time.Elapsed)
+				}
+			case .MouseMove:
+				position := Vec2f{web_event.F, web_event.G}
+				delta := Vec2f{position.X - app.Input.last_mouse.X, position.Y - app.Input.last_mouse.Y}
+				if position.X != app.Input.last_mouse.X || position.Y != app.Input.last_mouse.Y || delta.X != 0 || delta.Y != 0 {
+					app.Input.last_mouse = position
+					input_mouse_move(&app.Input, position, delta, app.Time.Elapsed)
+				}
+			case .MouseButtonDown:
+				// 桌面靠 input_update 轮询坐标; Web 禁用轮询, 按事件自带坐标更新位置
+				position := Vec2f{web_event.F, web_event.G}
+				app.Input.last_mouse = position
+				input_mouse_move(&app.Input, position, Vec2f{0, 0}, app.Time.Elapsed)
+				input_mouse_button(&app.Input, cast(MouseButtons)web_event.A, true, app.Time.Elapsed)
+			case .MouseButtonUp:
+				input_mouse_button(&app.Input, cast(MouseButtons)web_event.A, false, app.Time.Elapsed)
+			case .MouseWheel:
+				input_mouse_wheel(&app.Input, Vec2f{web_event.F, web_event.G})
+			}
+		}
+		return
+	}
+
 	SDL.PumpEvents()
 
 	event: SDL.Event
@@ -1351,8 +1557,10 @@ poll_events :: proc(app: ^App) {
 step_app :: proc(app: ^App, delta: coretime.Duration) {
 	app.Time = advance_time(app.Time, delta)
 
-	if SDL.GetWindowRelativeMouseMode(app.Window.Handle) && window_focused(&app.Window) {
-		SDL.WarpMouseInWindow(app.Window.Handle, f32(Width(&app.Window)) / 2, f32(Height(&app.Window)) / 2)
+	when ODIN_OS != .JS {
+		if SDL.GetWindowRelativeMouseMode(app.Window.Handle) && window_focused(&app.Window) {
+			SDL.WarpMouseInWindow(app.Window.Handle, f32(Width(&app.Window)) / 2, f32(Height(&app.Window)) / 2)
+		}
 	}
 
 	input_step(&app.Input, app.Time)
@@ -1366,21 +1574,30 @@ step_app :: proc(app: ^App, delta: coretime.Duration) {
 }
 
 tick_app :: proc(app: ^App) {
-	current_time := coretime.stopwatch_duration(app.timer)
-	delta_time := current_time - app.last_update_time
-	app.last_update_time = current_time
+	delta_time: coretime.Duration
+	when ODIN_OS == .JS {
+		// 帧步长来自 foster.js 的 rAF 时间差(见 web_runtime.foster_step)
+		delta_time = web_take_frame_delta()
+	} else {
+		current_time := coretime.stopwatch_duration(app.timer)
+		delta_time = current_time - app.last_update_time
+		app.last_update_time = current_time
+	}
 
 	switch app.UpdateMode.Mode {
 	case .Fixed:
 		app.fixed_accumulator += delta_time
 
-		if app.UpdateMode.FixedWaitEnabled {
-			for app.fixed_accumulator < app.UpdateMode.FixedTargetTime {
-				coretime.sleep(app.UpdateMode.FixedTargetTime - app.fixed_accumulator)
-				current_time = coretime.stopwatch_duration(app.timer)
-				delta_time = current_time - app.last_update_time
-				app.last_update_time = current_time
-				app.fixed_accumulator += delta_time
+		when ODIN_OS != .JS {
+			// JS 下 rAF 已按显示节奏驱动, 不能在 FixedWaitEnabled 里 sleep 阻塞主线程
+			if app.UpdateMode.FixedWaitEnabled {
+				for app.fixed_accumulator < app.UpdateMode.FixedTargetTime {
+					coretime.sleep(app.UpdateMode.FixedTargetTime - app.fixed_accumulator)
+					now := coretime.stopwatch_duration(app.timer)
+					delta_time = now - app.last_update_time
+					app.last_update_time = now
+					app.fixed_accumulator += delta_time
+				}
 			}
 		}
 
@@ -1411,6 +1628,16 @@ tick_app :: proc(app: ^App) {
 }
 
 run :: proc(app: ^App) {
+	when ODIN_OS == .JS {
+		// 尽早把 App 搬到堆上: StartupProc 里初始化的游戏对象(Batcher 等)
+		// 会持有 &app.GraphicsDevice, 栈上 main 返回后即失效
+		run_impl(web_relocate_app(app))
+	} else {
+		run_impl(app)
+	}
+}
+
+run_impl :: proc(app: ^App) {
 	if app.Disposed {
 		panic("Application is disposed")
 	}
@@ -1425,8 +1652,10 @@ run :: proc(app: ^App) {
 	app.Time = {}
 	app.last_update_time = 0
 	app.fixed_accumulator = 0
-	coretime.stopwatch_reset(&app.timer)
-	coretime.stopwatch_start(&app.timer)
+	when ODIN_OS != .JS {
+		coretime.stopwatch_reset(&app.timer)
+		coretime.stopwatch_start(&app.timer)
+	}
 
 	poll_events(app)
 	input_step(&app.Input, app.Time)
@@ -1436,10 +1665,20 @@ run :: proc(app: ^App) {
 		app.StartupProc(app)
 	}
 
+	when ODIN_OS == .JS {
+		// main 返回即"进入事件循环"; 后续帧由 foster.js 的 rAF 调用导出的 foster_step 驱动,
+		// 退出时的收尾(ShutdownProc 等)在 foster_step 检测到 Exiting 后执行(见 web_runtime)
+		web_enter_run_loop(app)
+		return
+	}
+
 	for !app.Exiting {
 		tick_app(app)
 	}
+	run_finish(app)
+}
 
+run_finish :: proc(app: ^App) {
 	drain_main_thread_queue(app)
 
 	if app.ShutdownProc != nil {

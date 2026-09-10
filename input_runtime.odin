@@ -662,6 +662,12 @@ input_controller_axis :: proc(input: ^Input, id: ControllerID, axis: int, value:
 }
 
 input_update :: proc(input: ^Input, window: ^Window, stamp: coretime.Duration) {
+	when ODIN_OS == .JS {
+		// Web: 鼠标状态由 DOM 事件驱动(foster.js 队列), 无逐帧轮询; M3 接入
+		_ = input
+		_ = stamp
+		return
+	}
 	if window == nil || window.Handle == nil {
 		return
 	}
@@ -730,6 +736,12 @@ input_rumble :: proc(input: ^Input, id: ControllerID, low_intensity, high_intens
 }
 
 input_close_devices :: proc(input: ^Input) {
+	when ODIN_OS == .JS {
+		// Web: M0 无 gamepad/joystick 设备; 仅清理容器
+		delete(input.open_joysticks)
+		delete(input.open_gamepads)
+		return
+	}
 	for joystick in input.open_joysticks {
 		if joystick.Ptr != nil {
 			SDL.CloseJoystick(joystick.Ptr)

@@ -2,7 +2,8 @@ package foster_images
 
 import spatial "../Spatial"
 import json "core:encoding/json"
-import os "core:os"
+import runtime ".."
+// core:os 经根包 storage_os_* 平台层使用(js 目标无 core:os)
 
 MsdfAtlasProperties :: struct { Type:string, DistanceRange,DistanceRangeMiddle,Size,Width,Height:f32, YOrigin:string }
 MsdfMetricsProperties :: struct { EmSize,LineHeight,Ascender,Descender,UnderlineY,UnderlineThickness:f32 }
@@ -26,6 +27,6 @@ MsdfFontMake :: proc(atlas:Image,data:[]u8)->MsdfFont {
 	json.destroy_value(value);return f
 }
 math_abs :: proc(v:f32)->f32{if v<0{return -v};return v}
-MsdfFontLoadFiles :: proc(image_path,data_path:string)->MsdfFont{image:=ImageLoadFile(image_path);data,err:=os.read_entire_file_from_path(data_path,context.temp_allocator);if err!=nil{return MsdfFont{Image=image}};return MsdfFontMake(image,data)}
+MsdfFontLoadFiles :: proc(image_path,data_path:string)->MsdfFont{image:=ImageLoadFile(image_path);data:=runtime.storage_os_read_file(data_path,context.temp_allocator);if data==nil{return MsdfFont{Image=image}};return MsdfFontMake(image,data)}
 MsdfFontGetKerning :: proc(f:^MsdfFont,a,b:int,size:f32=0)->f32{if f==nil{return 0};s:=size;if s==0{s=f.Size};for k in f.Kerning{if k.First==a&&k.Second==b{if f.Size>0{return k.Advance*(s/f.Size)};return k.Advance}};return 0}
 MsdfFontFindCharacter :: proc(f:^MsdfFont,codepoint:int)->(MsdfCharacter,bool){if f==nil{return {},false};for c in f.Characters{if c.Codepoint==codepoint{return c,true}};return {},false}
