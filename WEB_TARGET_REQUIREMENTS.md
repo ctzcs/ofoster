@@ -20,7 +20,7 @@
 - **§7 风险项已有结论**：core:os 在 js 下完全不可用 → vehicles 直接使用 `os.read_entire_file_from_path` 等的存档代码**必须**走 `when ODIN_OS == .JS` 分流到虚拟 FS 桥（不是可选项）。
 - **栈上 App 的生命周期陷阱**：.JS 下 `main()` 在 `Run` 注册帧循环后立即返回，游戏在 `main` 里声明的**栈上 `App` 结构会被后续调用复用覆写**（实测第 ~120 帧被 `fmt.println` 调用链打穿）。框架在 **`run()` 入口**经 `web_relocate_app` 把 App **堆拷贝并修正内部回指针**（Window/Input/FileSystem/RenderTarget；放在入口是因为 StartupProc 在 run 内部执行，其中初始化的 Batcher 等会持有 `&app.GraphicsDevice`）。**约束：游戏经 `AppSetUserData` 传入的状态在 web 上必须是全局变量或堆分配，不能是 main() 局部变量**（vehicles 需要检查这一点）。
 - **rAF 与页面可见性**：浏览器对 hidden 页面暂停 requestAnimationFrame（符合预期，省电）；`pagehide → Quit` 事件已接通。IAB/无头测试环境里页面恒为 hidden，验收时需手动驱动 `foster_step`（webtest 已验证此法）。
-- **M0 验收结果**（webtest，Chrome IAB 实测）：600 帧长跑无中断、计时精确（2/4/6/8/10s）、画布像素读回游戏驱动的清屏色、resize 事件正常消费、Quit 干净走 `run_finish`、退出后防重入；桌面（Windows）构建回归通过。产物：`web.odin`（Odin 桥）、`Internal/Web/foster.js`（JS 桥）、`webtest/`（验收程序 + 构建脚本）。
+- **M0 验收结果**（webtest，Chrome IAB 实测）：600 帧长跑无中断、计时精确（2/4/6/8/10s）、画布像素读回游戏驱动的清屏色、resize 事件正常消费、Quit 干净走 `run_finish`、退出后防重入；桌面（Windows）构建回归通过。产物：`web.odin`（Odin 桥）、`Internal/Web/foster.js`（JS 桥）、`tests/webtest/`（验收程序 + 构建脚本）。
 
 ### M2/M3/M4(2026-09-10)新增已验证事实
 

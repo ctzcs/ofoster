@@ -5,8 +5,8 @@ package webtest
 //   M3 键盘/鼠标/滚轮交互 + resize(OnResize 日志)
 //   M4 存档持久化(OpenUserStorage → localStorage, 刷新页面计数递增)
 //
-// 桌面构建回归: odin build webtest -collection:ofoster=.
-// Web 构建:      odin build webtest -collection:ofoster=. -target:js_wasm32 -o:speed -out:webtest/webtest.wasm
+// 桌面构建回归: odin build tests/webtest -collection:ofoster=.
+// Web 构建:      odin build tests/webtest -collection:ofoster=. -target:js_wasm32 -o:speed -out:tests/webtest/webtest.wasm
 
 import "core:fmt"
 import "core:math"

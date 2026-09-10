@@ -71,6 +71,6 @@ C# 的重载/实例方法在 Odin 侧多为"前缀 + 显式名"或 proc group，
 
 1. 在上游仓库对比 sync baseline commit 之后的变更清单。
 2. 按本表把每个改动的 C# 文件映射到对应 Odin 文件并移植。
-3. 跑 `webtest`（native + `js_wasm32`）与 `tests/graphics_regression`，以及
+3. 跑 `tests/webtest`（native + `js_wasm32`）与 `tests/graphics_regression`，以及
    `build/glade-regression` 与 `build/exhaustive-format-check`（若适用）。
 4. 更新 `README.md` 的 baseline、`foster_framework.odin` 的版本号和本表。
