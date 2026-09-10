@@ -12,7 +12,6 @@ import stb "./Internal/ThirdParty"
 import "core:mem"
 import "core:unicode/utf8"
 
-// ===== images =====
 Image :: struct { Width, Height: int, Pixels: [dynamic]Color, IsDisposed: bool }
 ImageMake :: proc(width, height: int, fill := Transparent) -> Image { i:=Image{Width=width,Height=height}; resize(&i.Pixels,width*height); for n in 0..<len(i.Pixels) { i.Pixels[n]=fill }; return i }
 ImageFromPixels :: proc(width,height:int,pixels:[]Color)->Image{i:=Image{Width=width,Height=height}; for p in pixels { append(&i.Pixels,p) }; return i}
@@ -49,7 +48,7 @@ ImageCopyPixels :: proc(dst:^Image,src:^Image,source_rect:=RectInt{0,0,0,0},dest
 ImageCopyPixelsBlend :: proc(dst:^Image,src:^Image,source_rect:RectInt,destination:Point2,blend:proc(a,b:Color)->Color=nil){r:=source_rect;if r.Width==0{r=ImageBounds(src)};for y in 0..<r.Height{for x in 0..<r.Width{c:=ImageGetPixel(src,r.X+x,r.Y+y);if blend!=nil{c=blend(ImageGetPixel(dst,destination.X+x,destination.Y+y),c)};ImageSetPixel(dst,destination.X+x,destination.Y+y,c)}}}
 ImagePremultiply :: proc(i:^Image){if i==nil{return};for n in 0..<len(i.Pixels){i.Pixels[n]=Premultiply(i.Pixels[n])}}
 
-// ===== merged from Images/Packer.odin =====
+// ===== Packer =====
 
 
 PackerEntry :: struct { Index:int, Name:string, Page:int, Source:RectInt, Frame:RectInt }
@@ -89,7 +88,7 @@ PackerPack :: proc(p:^Packer)->PackerOutput{
 	return out
 }
 
-// ===== merged from Images/Aseprite.odin =====
+// ===== Aseprite =====
 
 // core:os 经根包 storage_os_* 平台层使用(js 目标无 core:os)
 
@@ -227,7 +226,7 @@ AsepriteRenderFramesSlice :: proc(a:^Aseprite,from,to:int,slice:RectInt,filter:A
 AsepriteRenderSlice :: proc(a:^Aseprite,frame:int,slice_index:int,filter:AsepriteLayerFilter=nil)->Image{if a==nil||slice_index<0||slice_index>=len(a.Slices){return {}};img:=AsepriteRenderFrameFiltered(a,frame,filter);keys:=a.Slices[slice_index].Keys;if len(keys)==0{return img};key:=keys[0];for k in keys{if k.FrameStart<=frame{key=k}else{break}};out:=ImageMake(key.Bounds.Width,key.Bounds.Height);ImageCopyPixels(&out,&img,key.Bounds,Point2{});return out}
 
 
-// ===== merged from Images/MsdfFont.odin =====
+// ===== MsdfFont =====
 
 // core:os 经根包 storage_os_* 平台层使用(js 目标无 core:os)
 
@@ -257,7 +256,7 @@ MsdfFontLoadFiles :: proc(image_path,data_path:string)->MsdfFont{image:=ImageLoa
 MsdfFontGetKerning :: proc(f:^MsdfFont,a,b:int,size:f32=0)->f32{if f==nil{return 0};s:=size;if s==0{s=f.Size};for k in f.Kerning{if k.First==a&&k.Second==b{if f.Size>0{return k.Advance*(s/f.Size)};return k.Advance}};return 0}
 MsdfFontFindCharacter :: proc(f:^MsdfFont,codepoint:int)->(MsdfCharacter,bool){if f==nil{return {},false};for c in f.Characters{if c.Codepoint==codepoint{return c,true}};return {},false}
 
-// ===== merged from Images/Font.odin =====
+// ===== Font =====
 
 // core:os 经根包 storage_os_* 平台层使用(js 目标无 core:os)
 
@@ -279,7 +278,7 @@ FontGetImage :: proc(f:^Font,ch:FontCharacter)->Image{if !ch.Visible{return {}};
 FontGetImageForCodepoint :: proc(f:^Font,codepoint:int,scale:f32)->Image{ch:=FontGetCharacter(f,codepoint,scale);return FontGetImage(f,ch)}
 FontDispose :: proc(f:^Font){if f==nil{return};delete(f.Data);f.Backend=stb.StbFont{};f.Disposed=true}
 
-// ===== merged from Graphics/Texture.odin =====
+// ===== Texture =====
 TextureFromImage :: proc(device:^GraphicsDevice,image:^Image,name:string="")->Texture{tex:Texture;if device==nil||image==nil||image.Width<=0||image.Height<=0{return tex};TextureInit(&tex,device,image.Width,image.Height,.Color,name);TextureSetData(&tex,raw_data(image.Pixels),len(image.Pixels)*size_of(Color));return tex}
 
 // ===== sprite_font =====

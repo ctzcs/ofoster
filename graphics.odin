@@ -2980,7 +2980,7 @@ StorageBufferUpload :: storage_buffer_upload
 StorageBufferClear :: storage_buffer_clear
 StorageBufferDispose :: storage_buffer_dispose
 
-// ===== merged from Graphics/Defaults/DefaultResources.odin =====
+// ===== DefaultResources =====
 DefaultResourcesAvailable :: proc(device: ^GraphicsDevice) -> bool {
 	return device != nil && device.Defaults.Initialized
 }

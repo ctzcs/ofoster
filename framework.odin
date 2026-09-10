@@ -8,6 +8,22 @@ import "core:strings"
 import SDL "vendor:sdl3"
 // core:os 经 platform_thread_native/web.odin 间接使用(js 目标无 core:os)
 
+// ===== 版本(与上游 Foster 对齐) =====
+
+// Keep the port's public version aligned with the upstream Foster package.
+FosterVersionMajor :: 0
+FosterVersionMinor :: 4
+FosterVersionPatch :: 2
+
+version_string :: proc() -> string {
+	return fmt.aprintf("%d.%d.%d", FosterVersionMajor, FosterVersionMinor, FosterVersionPatch)
+}
+
+sdl_version_string :: proc() -> string {
+	v := SDL.GetVersion()
+	return fmt.aprintf("%d.%d.%d", SDL.VERSIONNUM_MAJOR(v), SDL.VERSIONNUM_MINOR(v), SDL.VERSIONNUM_MICRO(v))
+}
+
 Point2 :: struct {
 	X: int,
 	Y: int,
@@ -1576,7 +1592,7 @@ step_app :: proc(app: ^App, delta: coretime.Duration) {
 tick_app :: proc(app: ^App) {
 	delta_time: coretime.Duration
 	when ODIN_OS == .JS {
-		// 帧步长来自 foster.js 的 rAF 时间差(见 web_runtime.foster_step)
+		// 帧步长来自 foster.js 的 rAF 时间差(见 web.odin 的 foster_step)
 		delta_time = web_take_frame_delta()
 	} else {
 		current_time := coretime.stopwatch_duration(app.timer)
@@ -1667,7 +1683,7 @@ run_impl :: proc(app: ^App) {
 
 	when ODIN_OS == .JS {
 		// main 返回即"进入事件循环"; 后续帧由 foster.js 的 rAF 调用导出的 foster_step 驱动,
-		// 退出时的收尾(ShutdownProc 等)在 foster_step 检测到 Exiting 后执行(见 web_runtime)
+		// 退出时的收尾(ShutdownProc 等)在 foster_step 检测到 Exiting 后执行(见 web.odin)
 		web_enter_run_loop(app)
 		return
 	}

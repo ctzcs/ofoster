@@ -7,7 +7,6 @@ import "base:intrinsics"
 import "core:fmt"
 import coretime "core:time"
 
-// ===== utility =====
 Right :: f32(0)
 Left :: PI
 Up :: PI + HalfPI
@@ -186,7 +185,7 @@ Triangulate :: proc(vertices: []Vec2, indices: ^[dynamic]int) {
 	}
 }
 
-// ===== merged from Utility/Converters.odin =====
+// ===== Converters =====
 
 
 Vector2Converter :: struct {}
@@ -198,7 +197,7 @@ IntVectorJsonConverter :: struct {}
 FloatVectorToString :: proc(values: []f32) -> string { b:=strings.builder_make(); defer strings.builder_destroy(&b); strings.write_string(&b,"["); for i,v in values { if i>0 {strings.write_string(&b,", ")}; strings.write_string(&b,fmt.aprintf("%g",v)) }; strings.write_string(&b,"]"); return strings.to_string(b) }
 IntVectorToString :: proc(values: []int) -> string { b:=strings.builder_make(); defer strings.builder_destroy(&b); strings.write_string(&b,"["); for i,v in values { if i>0 {strings.write_string(&b,", ")}; strings.write_string(&b,fmt.aprintf("%d",v)) }; strings.write_string(&b,"]"); return strings.to_string(b) }
 
-// ===== merged from Utility/Ease.odin =====
+// ===== Ease =====
 
 
 Linear :: proc(t: f32) -> f32 { return t }
@@ -209,7 +208,7 @@ SineIn :: proc(t: f32) -> f32 { return 1-math.cos(t*f32(math.PI)*0.5) }
 SineOut :: proc(t: f32) -> f32 { return math.sin(t*f32(math.PI)*0.5) }
 SineInOut :: proc(t: f32) -> f32 { return -(math.cos(f32(math.PI)*t)-1)*0.5 }
 
-// ===== merged from Utility/Log.odin =====
+// ===== Log =====
 
 
 LogState :: struct { History: [dynamic]string, OnInfo: proc(msg: string), OnWarning: proc(msg: string), OnError: proc(msg: string) }
@@ -220,7 +219,7 @@ LogError :: proc(state: ^LogState, message: string) { log_append(state,message);
 LogClearHistory :: proc(state: ^LogState) { clear(&state.History) }
 LogHistory :: proc(state: ^LogState) -> []string { return state.History[:] }
 
-// ===== merged from Utility/Pool.odin =====
+// ===== Pool =====
 
 Pool :: struct($T: typeid) { Available: [dynamic]T }
 PoolGet :: proc(pool: ^Pool($T)) -> T { if len(pool.Available)>0 { n:=len(pool.Available)-1; v:=pool.Available[n]; resize(&pool.Available,n); return v }; return T{} }
@@ -228,7 +227,7 @@ PoolReturn :: proc(pool: ^Pool($T), value:T){append(&pool.Available,value)}
 PoolClear :: proc(pool: ^Pool($T)){clear(&pool.Available)}
 IPoolable :: #type proc(value: rawptr)
 
-// ===== merged from Utility/Rng.odin =====
+// ===== Rng =====
 
 
 Rng :: struct { Seed: u64 }
@@ -254,7 +253,7 @@ RngChoose :: proc(r:^Rng, choices: []$T)->T{if len(choices)==0{return {}};return
 RngShuffle :: proc(r:^Rng, values: []$T){for i:=len(values)-1;i>0;i-=1{j:=RngIntMax(r,i+1);values[i],values[j]=values[j],values[i]}}
 RngPointInside :: proc(r:^Rng, rect: Rect)->Vec2{return RectOn(rect,RngFloat(r),RngFloat(r))}
 
-// ===== merged from Utility/StackList.odin =====
+// ===== StackList =====
 
 StackList4 :: struct($T: typeid) { Data: [4]T, Count: int }
 StackList8 :: struct($T: typeid) { Data: [8]T, Count: int }
@@ -276,7 +275,7 @@ StackList16Clear :: proc(list: ^StackList16($T)){list.Count=0}
 StackList32Clear :: proc(list: ^StackList32($T)){list.Count=0}
 StackList64Clear :: proc(list: ^StackList64($T)){list.Count=0}
 
-// ===== merged from Utility/TriangulationEnumerator.odin =====
+// ===== TriangulationEnumerator =====
 
 
 TriangulationEnumerable :: struct { Vertices: []Vec2, Triangles: []int }
@@ -292,7 +291,7 @@ EnumWith :: proc(flags, value: $T) -> T { return flags | value }
 EnumWithout :: proc(flags, value: $T) -> T { return flags & ~value }
 EnumMask :: proc(flags, value: $T, condition: bool) -> T { if condition { return EnumWith(flags,value) }; return EnumWithout(flags,value) }
 
-// ===== merged from Extensions/Numbers.odin =====
+// ===== Numbers =====
 
 NumberHas :: proc(flags,check:$T)->bool{return (flags & check)!=0}
 NumberHasAll :: proc(flags,check:$T)->bool{return (flags & check)==check}
@@ -300,7 +299,7 @@ NumberWith :: proc(flags,value:$T)->T{return flags|value}
 NumberWithout :: proc(flags,value:$T)->T{return flags & ~value}
 NumberMask :: proc(flags,value:$T,condition:bool)->T{if condition{return flags|value};return flags & ~value}
 
-// ===== merged from Extensions/Numerics.odin =====
+// ===== Numerics =====
 
 
 // Quaternion mirrors System.Numerics.Quaternion for callers that need the
@@ -383,7 +382,7 @@ Matrix3x2XScale :: proc(m: Matrix3x2) -> f32 { return math.sqrt(m.M11*m.M11+m.M2
 Matrix3x2YScale :: proc(m: Matrix3x2) -> f32 { return math.sqrt(m.M12*m.M12+m.M22*m.M22) }
 Matrix3x2Scale :: proc(m: Matrix3x2) -> Vec2 { return Vec2{Matrix3x2XScale(m),Matrix3x2YScale(m)} }
 
-// ===== merged from Extensions/TimeSpan.odin =====
+// ===== TimeSpan =====
 
 
 DurationModulo :: proc(value: coretime.Duration, seconds:f64)->coretime.Duration{if seconds<=0{return 0}; period:=coretime.Duration(seconds*1e9); return value%period}

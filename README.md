@@ -23,7 +23,7 @@ baseline. The Odin port is synchronized against this commit for version
 tracking, with the remaining API differences to be ported incrementally.
 When synchronizing later, compare upstream changes after this commit and update
 this section together with `FosterVersionMajor`, `FosterVersionMinor`, and
-`FosterVersionPatch` in `foster_framework.odin`.
+`FosterVersionPatch` in `framework.odin`.
 
 The 0.4.2 additions currently exposed by the port include stencil/fill draw
 state, texture flags and region operations, compute pipeline/dispatch types,
@@ -53,6 +53,20 @@ files to these files, plus intentional API differences, is documented in
 [PORTING_MAP.md](PORTING_MAP.md). The only subpackages are the internal ones:
 `Internal/ThirdParty` (vendored C bindings) and `Internal/Web` (JS side of the
 web bridge).
+
+## Repository layout
+
+- Root package (the library itself): `framework.odin` (app lifecycle, window,
+  version), `foundation.odin` (math/color basics), `graphics.odin` (the GPU
+  layer incl. Batcher), `images.odin` (image loading and fonts), `input.odin`,
+  `spatial.odin`, `utility.odin`, `storage.odin`, `web.odin` (js bridge), plus
+  `#+build` platform pairs (`storage_os_*`, `storage_path_*`,
+  `platform_thread_*`).
+- `assets/shaders/`: default shaders embedded at compile time via `#load`.
+- `Internal/`: vendored C bindings (`ThirdParty`) and the web bridge JS (`Web`).
+- `tests/`: `webtest` (web acceptance program) and `graphics_regression`
+  (GPU regression suite).
+- `build/`: git-ignored scratch space for local harnesses and artifacts.
 
 ## App usage
 

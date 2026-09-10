@@ -2,7 +2,7 @@ package foster_framework
 
 import "core:math"
 
-// ===== merged from Spatial/Cardinal.odin =====
+// ===== Cardinal =====
 
 
 Cardinal :: struct { Value: int }
@@ -34,7 +34,7 @@ CardinalFromPoint :: proc(p: Point2) -> Cardinal { if math.abs(p.X) > math.abs(p
 CardinalFromVector :: proc(v: [2]f32) -> Cardinal { if math.abs(v[0]) > math.abs(v[1]) { if v[0] < 0 do return CardinalLeft; return CardinalRight }; if v[1] < 0 do return CardinalUp; return CardinalDown }
 CardinalAll :: [4]Cardinal{CardinalRight, CardinalDown, CardinalLeft, CardinalUp}
 
-// ===== merged from Spatial/Circle.odin =====
+// ===== Circle =====
 
 
 Circle :: struct {
@@ -77,7 +77,7 @@ CircleInflate :: proc(circle: Circle, amount: f32) -> Circle { return Circle{cir
 CircleTranslate :: proc(circle: Circle, by: Vec2) -> Circle { return Circle{vec2_add(circle.Position, by), circle.Radius} }
 CircleIntersectsLine :: proc(circle: Circle, line: Line) -> bool { return CircleOverlapsLine(circle, line) }
 
-// ===== merged from Spatial/ConvexPolygon.odin =====
+// ===== ConvexPolygon =====
 
 
 ConvexPolygon :: struct { Vertices: [dynamic]Vec2 }
@@ -134,17 +134,17 @@ ConvexPolygonContains :: proc(polygon: ConvexPolygon, point: Vec2) -> bool {
 ConvexPolygonProject :: proc(polygon: ConvexPolygon, axis: Vec2) -> (min,max:f32) { if len(polygon.Vertices)==0 do return 0,0;min=vec2_dot(polygon.Vertices[0],axis);max=min;for p in polygon.Vertices[1:] {d:=vec2_dot(p,axis);min=math.min(min,d);max=math.max(max,d)};return }
 ConvexPolygonEdges :: proc(polygon: ConvexPolygon) -> [dynamic]Line { edges:[dynamic]Line;for i:=0;i<len(polygon.Vertices);i+=1 { append(&edges,Line{polygon.Vertices[i],polygon.Vertices[(i+1)%len(polygon.Vertices)]}) };return edges }
 
-// ===== merged from Spatial/IConvexShape.odin =====
+// ===== IConvexShape =====
 
 // Convex shapes share point/axis projection conventions.
 ConvexShapeProjection :: proc(axis: Vec2) -> (min, max: f32)
 
-// ===== merged from Spatial/IProjectable.odin =====
+// ===== IProjectable =====
 
 // Shapes expose projection through their dedicated Project procedures.
 ProjectableProjection :: proc(axis: Vec2) -> (min, max: f32)
 
-// ===== merged from Spatial/Line.odin =====
+// ===== Line =====
 
 
 Vec2 :: [2]f32
@@ -231,7 +231,7 @@ LineIntersectsBool :: proc(a, b: Line) -> bool { hit, _ := LineIntersects(a, b);
 
 LineTranslate :: proc(line: Line, by: Vec2) -> Line { return Line{vec2_add(line.From, by), vec2_add(line.To, by)} }
 
-// ===== merged from Spatial/LineInt.odin =====
+// ===== LineInt =====
 
 
 LineInt :: struct {
@@ -300,7 +300,7 @@ LineIntTranslate :: proc(line: LineInt, by: Point2) -> LineInt {
 	}
 }
 
-// ===== merged from Spatial/Point3.odin =====
+// ===== Point3 =====
 
 
 Vec3 :: [3]f32
@@ -336,7 +336,7 @@ Point3Mod :: proc(p:Point3,scalar:int)->Point3{if scalar==0{return {}};return Po
 Point3DivFloat :: proc(p:Point3,scalar:f32)->Vec3{if scalar==0{return {}};return Vec3{f32(p.X)/scalar,f32(p.Y)/scalar,f32(p.Z)/scalar}}
 Point3ModFloat :: proc(p:Point3,scalar:f32)->Vec3{if scalar==0{return {}};return Vec3{math.mod(f32(p.X),scalar),math.mod(f32(p.Y),scalar),math.mod(f32(p.Z),scalar)}}
 
-// ===== merged from Spatial/Polygon.odin =====
+// ===== Polygon =====
 
 
 Polygon :: struct {
@@ -384,7 +384,7 @@ PolygonContains :: proc(polygon: Polygon, point: Vec2) -> bool {
 
 PolygonMove :: proc(polygon: ^Polygon, offset: Vec2) { for i := 0; i < len(polygon.Vertices); i += 1 { polygon.Vertices[i] = vec2_add(polygon.Vertices[i],offset) } }
 
-// ===== merged from Spatial/Quad.odin =====
+// ===== Quad =====
 
 
 Quad :: struct { A, B, C, D: Vec2 }
@@ -400,7 +400,7 @@ QuadAverage :: proc(q: Quad) -> Vec2 { return vec2_scale(vec2_add(vec2_add(q.A,q
 QuadEdges :: proc(q: Quad) -> [4]Line { return [4]Line{Line{q.A,q.B},Line{q.B,q.C},Line{q.C,q.D},Line{q.D,q.A}} }
 QuadProject :: proc(q: Quad, axis: Vec2) -> (min,max:f32) { points:=[4]Vec2{q.A,q.B,q.C,q.D}; min=1e30;max=-1e30;for p in points { d:=vec2_dot(p,axis);min=math.min(min,d);max=math.max(max,d)};return }
 
-// ===== merged from Spatial/Ray.odin =====
+// ===== Ray =====
 
 Ray :: struct {
 	Position: Vec2,
@@ -410,7 +410,7 @@ Ray :: struct {
 RayMake :: proc(position, direction: Vec2) -> Ray { return Ray{position, direction} }
 RayAt :: proc(ray: Ray, distance: f32) -> Vec2 { return vec2_add(ray.Position, vec2_scale(ray.Direction, distance)) }
 
-// ===== merged from Spatial/Rect.odin =====
+// ===== Rect =====
 
 
 Rect :: struct {
@@ -552,7 +552,7 @@ RectGetPoint :: proc(rect: Rect, index: int) -> Vec2 {
 }
 RectGetAxis :: proc(rect: Rect, index: int) -> Vec2 { if index == 0 do return Vec2{1, 0}; if index == 1 do return Vec2{0, 1}; return Vec2{} }
 
-// ===== merged from Spatial/RectInt.odin =====
+// ===== RectInt =====
 
 
 RectInt :: struct {
@@ -841,11 +841,11 @@ RectIntOverlapsLineInt :: proc(rect: RectInt, line: LineInt) -> bool {
 
 RectIntOverlaps :: proc{rect_int_overlaps_rectint, RectIntOverlapsRect, RectIntOverlapsLine, RectIntOverlapsLineInt}
 
-// ===== merged from Spatial/Signs.odin =====
+// ===== Signs =====
 
 Signs :: enum { Positive, Negative }
 
-// ===== merged from Spatial/Transform.odin =====
+// ===== Transform =====
 
 
 Matrix3x2 :: struct {
@@ -920,7 +920,7 @@ TransformMatrixInverse :: proc(transform: ^Transform) -> Matrix3x2 {
 TransformPoint :: proc(transform: ^Transform, point: Vec2) -> Vec2 { return Matrix3x2TransformPoint(TransformMatrix(transform), point) }
 TransformPointInverse :: proc(transform: ^Transform, point: Vec2) -> Vec2 { return Matrix3x2TransformPoint(TransformMatrixInverse(transform), point) }
 
-// ===== merged from Spatial/Triangle.odin =====
+// ===== Triangle =====
 
 
 Triangle :: struct { A, B, C: Vec2 }

@@ -2,7 +2,7 @@
 
 本文档记录上游 C# Foster 源文件与本项目 Odin 文件的对应关系，以及移植中
 有意做出的 API 差异。同步上游时，先对照本表定位每个上游文件在 Odin 侧的
-落点，再更新 `README.md` 的 sync baseline 一节与 `foster_framework.odin`
+落点，再更新 `README.md` 的 sync baseline 一节与 `framework.odin`
 里的版本号。
 
 ## 布局原则
@@ -73,4 +73,4 @@ C# 的重载/实例方法在 Odin 侧多为"前缀 + 显式名"或 proc group，
 2. 按本表把每个改动的 C# 文件映射到对应 Odin 文件并移植。
 3. 跑 `tests/webtest`（native + `js_wasm32`）与 `tests/graphics_regression`，以及
    `build/glade-regression` 与 `build/exhaustive-format-check`（若适用）。
-4. 更新 `README.md` 的 baseline、`foster_framework.odin` 的版本号和本表。
+4. 更新 `README.md` 的 baseline、`framework.odin` 的版本号和本表。

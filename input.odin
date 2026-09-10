@@ -6,7 +6,6 @@ import SDL "vendor:sdl3"
 import "core:time"
 import "core:c"
 
-// ===== input =====
 ControllerID :: distinct u32
 
 Keys :: enum int {
@@ -1011,7 +1010,7 @@ BindingGetState :: proc(binding: Binding, input: ^Input, device: int) -> Binding
 	return result
 }
 
-// ===== merged from Input/Bindings/BindingAxisOverlap.odin =====
+// ===== BindingAxisOverlap =====
 
 
 BindingAxisOverlap :: enum { TakeNewer, TakeOlder, CancelOut }
@@ -1027,42 +1026,42 @@ BindingAxisOverlapResolve :: proc(overlap: BindingAxisOverlap, negative, positiv
     return 0
 }
 
-// ===== merged from Input/Bindings/BindingState.odin =====
+// ===== BindingState =====
 
 
 BindingState :: struct { Pressed, Released, Down: bool, Value: f32, Timestamp: time.Duration }
 
-// ===== merged from Input/Bindings/ControllerAxisBinding.odin =====
+// ===== ControllerAxisBinding =====
 
 
 ControllerAxisBinding :: struct { Axis: Axes, Sign: int, Deadzone: f32 }
 ControllerAxisBindingMake :: proc(axis: Axes, sign: int, deadzone: f32) -> ControllerAxisBinding { return ControllerAxisBinding{axis, sign, deadzone} }
 
-// ===== merged from Input/Bindings/ControllerButtonBinding.odin =====
+// ===== ControllerButtonBinding =====
 
 
 ControllerButtonBinding :: struct { Button: Buttons }
 ControllerButtonBindingMake :: proc(button: Buttons) -> ControllerButtonBinding { return ControllerButtonBinding{button} }
 
-// ===== merged from Input/Bindings/KeyboardKeyBinding.odin =====
+// ===== KeyboardKeyBinding =====
 
 
 KeyboardKeyBinding :: struct { Key: Keys }
 KeyboardKeyBindingMake :: proc(key: Keys) -> KeyboardKeyBinding { return KeyboardKeyBinding{key} }
 KeyboardKeyBindingDescriptor :: proc(binding: KeyboardKeyBinding) -> string { return "Keyboard Key" }
 
-// ===== merged from Input/Bindings/MouseButtonBinding.odin =====
+// ===== MouseButtonBinding =====
 
 
 MouseButtonBinding :: struct { Button: MouseButtons }
 MouseButtonBindingMake :: proc(button: MouseButtons) -> MouseButtonBinding { return MouseButtonBinding{button} }
 
-// ===== merged from Input/Bindings/MouseMotionBinding.odin =====
+// ===== MouseMotionBinding =====
 
 MouseMotionBinding :: struct { Axis: [2]f32, Sign: int, Min, Max: f32 }
 MouseMotionBindingMake :: proc(axis: [2]f32, sign: int, min_value, max_value: f32) -> MouseMotionBinding { return MouseMotionBinding{axis, sign, min_value, max_value} }
 
-// ===== merged from Input/Sets/ActionBindingSet.odin =====
+// ===== ActionBindingSet =====
 
 
 ActionEntry :: struct { Binding: Binding, Masks: [dynamic]string }
@@ -1084,7 +1083,7 @@ ActionBindingSetClear :: proc(set: ^ActionBindingSet) { clear(&set.Entries) }
 ActionBindingSet_ActionEntry :: ActionEntry
 
 
-// ===== merged from Input/Sets/AxisBindingSet.odin =====
+// ===== AxisBindingSet =====
 
 
 AxisEntry :: struct { Negative, Positive: Binding, Overlap: BindingAxisOverlap, Masks: [dynamic]string }
@@ -1105,7 +1104,7 @@ AxisBindingSetClear :: proc(set: ^AxisBindingSet) { clear(&set.Entries) }
 AxisBindingSet_AxisEntry :: AxisEntry
 
 
-// ===== merged from Input/Sets/StickBindingSet.odin =====
+// ===== StickBindingSet =====
 
 
 StickEntry :: struct { Left, Right, Up, Down: Binding, CircularDeadzone: f32, Overlap: BindingAxisOverlap, Masks: [dynamic]string }
@@ -1141,7 +1140,7 @@ VirtualInputSetControllerIndex :: proc(v: ^VirtualInput, index: int) { if index 
 VirtualInputSetActive :: proc(v: ^VirtualInput, active: bool) { if v != nil { v.Active = active } }
 VirtualInputIsActive :: proc(v: ^VirtualInput) -> bool { return v != nil && v.Active && !v.IsDisposed }
 
-// ===== merged from Input/Virtual/VirtualDevice.odin =====
+// ===== VirtualDevice =====
 
 
 VirtualDeviceIndexMode :: enum { Manual, AutomaticLatest }
@@ -1165,7 +1164,7 @@ VirtualDeviceUpdate :: proc(v: ^VirtualDevice, t: Time) {
 VirtualDeviceDispose :: proc(v: ^VirtualDevice) { if v.Base.IsDisposed { return }; for p in v.Inputs { VirtualInputDispose(p) }; clear(&v.Inputs); clear(&v.actions); clear(&v.axes); clear(&v.sticks); v.Base.IsDisposed=true }
 VirtualDeviceIsGamepadLatest :: proc(v: ^VirtualDevice) -> bool { if v.Base.Input == nil || v.Base.ControllerIndex < 0 || v.Base.ControllerIndex >= InputMaxControllers { return false }; c:=&v.Base.Input.State.Controllers[v.Base.ControllerIndex]; return c.IsGamepad && c.InputTimestamp > v.Base.Input.State.Keyboard.InputTimestamp }
 
-// ===== merged from Input/Virtual/VirtualAction.odin =====
+// ===== VirtualAction =====
 
 
 VirtualAction :: struct {
@@ -1200,7 +1199,7 @@ VirtualActionConsumePress :: proc(v: ^VirtualAction) -> bool { if v.Pressed { v.
 VirtualActionClear :: proc(v: ^VirtualAction) { v.Pressed=false; v.Released=false; v.PressConsumed=true; v.Down=false; v.Repeated=false; v.Value=0; v.ValueNoDeadzone=0 }
 VirtualActionSetControllerIndex :: proc(v: ^VirtualAction, index: int) { VirtualInputSetControllerIndex(&v.Base,index) }
 
-// ===== merged from Input/Virtual/VirtualAxis.odin =====
+// ===== VirtualAxis =====
 
 
 VirtualAxis :: struct { Base: VirtualInput, Set: AxisBindingSet, Value: f32, IntValue: int, PressedSign: int }
@@ -1213,7 +1212,7 @@ VirtualAxisPressedPositive :: proc(v: ^VirtualAxis) -> bool { return v.PressedSi
 VirtualAxisClear :: proc(v: ^VirtualAxis) { v.Value=0; v.IntValue=0; v.PressedSign=0 }
 VirtualAxisSetControllerIndex :: proc(v: ^VirtualAxis,index:int) { VirtualInputSetControllerIndex(&v.Base,index) }
 
-// ===== merged from Input/Virtual/VirtualStick.odin =====
+// ===== VirtualStick =====
 
 
 VirtualStick :: struct { Base: VirtualInput, Set: StickBindingSet, Value: [2]f32, IntValue: Point2, PressedLeft, PressedRight, PressedUp, PressedDown: bool }
@@ -1235,7 +1234,7 @@ InputProviderMouseWheel :: proc(p:^InputProvider,wheel:Vec2f){if p.Input!=nil{In
 InputProviderControllerButton :: proc(p:^InputProvider,id:ControllerID,button:int,pressed:bool,stamp:coretime.Duration){if p.Input!=nil{InputControllerButton(p.Input,id,button,pressed,stamp)}}
 InputProviderControllerAxis :: proc(p:^InputProvider,id:ControllerID,axis:int,value:f32,stamp:coretime.Duration){if p.Input!=nil{InputControllerAxis(p.Input,id,axis,value,stamp)}}
 
-// ===== merged from Input/Cursor.odin =====
+// ===== Cursor =====
 
 
 CursorSystemType :: enum { Default, Text, Wait, Crosshair, Progress, ResizeNWSE, ResizeNESW, ResizeHorizontal, ResizeVertical, Move, NotAllowed, Pointer, ResizeNW, ResizeN, ResizeNE, ResizeE, ResizeSE, ResizeS, ResizeSW, ResizeW }
