@@ -37,7 +37,7 @@ $odinRoot = (& odin root).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Cannot locate Odin.' }
 Copy-Item -LiteralPath (Join-Path $odinRoot 'vendor/sdl3/SDL3.dll') -Destination $outputDirectory
 $executable = Join-Path $outputDirectory 'graphics-regression.exe'
-& odin build $PSScriptRoot "-collection:ofoster=$repoRoot" "-out:$executable"
+& odin build $PSScriptRoot "-collection:ofoster=$repoRoot/src" "-out:$executable"
 if ($LASTEXITCODE -ne 0) { throw 'Graphics regression build failed.' }
 foreach ($driver in $Drivers) {
     & $executable $driver $outputDirectory

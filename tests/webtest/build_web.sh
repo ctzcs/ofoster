@@ -8,7 +8,7 @@ cd "$(dirname "$0")/../.."
 ODIN_BIN="${ODIN:-odin}"
 ODIN_ROOT="$("$ODIN_BIN" root 2>/dev/null || true)"
 ODIN_JS="$ODIN_ROOT/core/sys/wasm/js/odin.js"
-$ODIN_BIN build tests/webtest -collection:ofoster=. -target:js_wasm32 -o:speed -out:tests/webtest/webtest.wasm
+$ODIN_BIN build tests/webtest -collection:ofoster=src -target:js_wasm32 -o:speed -out:tests/webtest/webtest.wasm
 if [ ! -f tests/webtest/odin.js ]; then
 	if [ -f "$ODIN_JS" ]; then
 		cp "$ODIN_JS" tests/webtest/odin.js

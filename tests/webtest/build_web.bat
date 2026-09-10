@@ -7,7 +7,7 @@ setlocal
 where odin >nul 2>nul
 if %errorlevel%==0 (set ODIN=odin) else (set ODIN=D:\Lib\odin\odin.exe)
 cd /d "%~dp0..\.."
-%ODIN% build tests/webtest -collection:ofoster=. -target:js_wasm32 -o:speed -out:tests\webtest\webtest.wasm
+%ODIN% build tests/webtest -collection:ofoster=src -target:js_wasm32 -o:speed -out:tests\webtest\webtest.wasm
 if errorlevel 1 exit /b 1
 copy /y "D:\Lib\odin\core\sys\wasm\js\odin.js" tests\webtest\odin.js >nul
 echo web build ok: tests\webtest\webtest.wasm

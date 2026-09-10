@@ -55,7 +55,7 @@
 
 ## 1. 目标
 
-vehicles 以 `odin build src -target:js_wasm32 -collection:ofoster=..\OFoster` 构建，产物 + `odin.js` + `foster.js` + `index.html` 在 Chrome/Edge/Firefox/Safari 直接可玩。
+vehicles 以 `odin build src -target:js_wasm32 -collection:ofoster=..\OFoster\src` 构建，产物 + `odin.js` + `foster.js` + `index.html` 在 Chrome/Edge/Firefox/Safari 直接可玩。
 
 **硬性约束：OFoster 公共 API（App/Window/Graphics/Input/Storage 对外的 proc 与 struct 签名）不变；vehicles 游戏代码零改动（仅 build 脚本层面的差异可接受）。**
 
@@ -186,7 +186,7 @@ vehicles 以 `odin build src -target:js_wasm32 -collection:ofoster=..\OFoster` �
 ### 12.2 构建
 
 ```
-odin build src -collection:ofoster=<OFoster路径> -target:js_wasm32 -o:speed -out:build/web/<游戏名>.wasm
+odin build src -collection:ofoster=<OFoster路径>/src -target:js_wasm32 -o:speed -out:build/web/<游戏名>.wasm
 ```
 
 产物目录共 5 个文件（资产须全部 `#load` 内嵌进 wasm，不落盘）：

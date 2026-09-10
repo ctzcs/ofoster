@@ -47,7 +47,7 @@ import foster "ofoster:."
 The package mirrors Foster's public concepts: `App`, `Window`, `GraphicsDevice`,
 `Texture`, `Target`, `Shader`, `Material`, `Mesh`, input bindings, spatial
 primitives, storage helpers, and utility functions. Everything lives in the
-single root package, organized as topic files (`framework.odin`, `input.odin`,
+single package under `src/`, organized as topic files (`framework.odin`, `input.odin`,
 `spatial.odin`, `storage.odin`, ...). The mapping from upstream Foster's C#
 files to these files, plus intentional API differences, is documented in
 [PORTING_MAP.md](docs/PORTING_MAP.md). The only subpackages are the internal ones:
@@ -56,7 +56,7 @@ web bridge).
 
 ## Repository layout
 
-- Root package (the library itself): `framework.odin` (app lifecycle, window,
+- `src/`: the library package itself — `framework.odin` (app lifecycle, window,
   version), `foundation.odin` (math/color basics), `graphics.odin` (the GPU
   layer incl. Batcher), `images.odin` (image loading and fonts), `input.odin`,
   `spatial.odin`, `utility.odin`, `storage.odin`, `web.odin` (js bridge), plus
