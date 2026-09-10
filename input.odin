@@ -3,7 +3,10 @@ package foster_framework
 import "core:math"
 import coretime "core:time"
 import SDL "vendor:sdl3"
+import "core:time"
+import "core:c"
 
+// ===== input =====
 ControllerID :: distinct u32
 
 Keys :: enum int {
@@ -926,3 +929,331 @@ InputControllerButton :: input_controller_button
 InputControllerAxis :: input_controller_axis
 InputInit :: input_init
 InputStep :: input_step
+
+// ===== input_bindings =====
+BindingKind :: enum { KeyboardKey, ControllerAxis, ControllerButton, MouseButton, MouseMotion }
+
+// Binding is a compact tagged value.  Keeping the payload here makes bindings
+// copyable and usable by the set types without requiring heap allocated
+// interface values.
+Binding :: struct {
+	Kind: BindingKind,
+	Key: Keys,
+	Axis: Axes,
+	Button: Buttons,
+	MouseButton: MouseButtons,
+	Sign: int,
+	Deadzone: f32,
+	MotionAxis: [2]f32,
+	Min: f32,
+	Max: f32,
+}
+
+BindingFromKeyboard :: proc(v: KeyboardKeyBinding) -> Binding { return Binding{Kind=.KeyboardKey, Key=v.Key} }
+BindingFromControllerAxis :: proc(v: ControllerAxisBinding) -> Binding { return Binding{Kind=.ControllerAxis, Axis=v.Axis, Sign=v.Sign, Deadzone=v.Deadzone} }
+BindingFromControllerButton :: proc(v: ControllerButtonBinding) -> Binding { return Binding{Kind=.ControllerButton, Button=v.Button} }
+BindingFromMouseButton :: proc(v: MouseButtonBinding) -> Binding { return Binding{Kind=.MouseButton, MouseButton=v.Button} }
+BindingFromMouseMotion :: proc(v: MouseMotionBinding) -> Binding { return Binding{Kind=.MouseMotion, MotionAxis=v.Axis, Sign=v.Sign, Min=v.Min, Max=v.Max} }
+
+BindingDescriptor :: proc(binding: Binding) -> string {
+	switch binding.Kind {
+	case .KeyboardKey: return "Keyboard Key"
+	case .ControllerAxis: return "Controller Axis"
+	case .ControllerButton: return "Controller Button"
+	case .MouseButton: return "Mouse Button"
+	case .MouseMotion: return "Mouse Motion"
+	}
+	return "Binding"
+}
+
+binding_axis_value :: proc(binding: Binding, state: InputState, device: int) -> f32 {
+	if device < 0 || device >= InputMaxControllers { return 0 }
+	v := state.Controllers[device].axis[int(binding.Axis)] * f32(binding.Sign)
+	return Clamp((v - binding.Deadzone) / (1 - binding.Deadzone), 0, 1)
+}
+
+BindingGetState :: proc(binding: Binding, input: ^Input, device: int) -> BindingState {
+	result := BindingState{}
+	switch binding.Kind {
+	case .KeyboardKey:
+		k := &input.State.Keyboard
+		result = BindingState{Pressed=KeyboardPressed(k, binding.Key), Released=KeyboardReleased(k, binding.Key), Down=KeyboardDown(k, binding.Key), Value=0, Timestamp=Timestamp(k, binding.Key)}
+		if result.Down { result.Value = 1 }
+	case .ControllerButton:
+		if device < 0 || device >= InputMaxControllers { return result }
+		c := &input.State.Controllers[device]
+		result = BindingState{Pressed=ControllerPressed(c, binding.Button), Released=ControllerReleased(c, binding.Button), Down=ControllerDown(c, binding.Button), Value=0, Timestamp=ControllerTimestamp(c, binding.Button)}
+		if result.Down { result.Value = 1 }
+	case .ControllerAxis:
+		if device < 0 || device >= InputMaxControllers { return result }
+		c := &input.State.Controllers[device]
+		v := binding_axis_value(binding, input.State, device)
+		prev := binding_axis_value(binding, input.LastState, device)
+		result.Value = v
+		result.Down = v > 0
+		result.Pressed = v > 0 && prev <= 0
+		result.Released = v <= 0 && prev > 0
+		result.Timestamp = ControllerAxisTimestamp(c, binding.Axis)
+	case .MouseButton:
+		m := &input.State.Mouse
+		result = BindingState{Pressed=MousePressed(m, binding.MouseButton), Released=MouseReleased(m, binding.MouseButton), Down=MouseDown(m, binding.MouseButton), Value=0, Timestamp=PressedTimestamp(m, binding.MouseButton)}
+		if result.Down { result.Value = 1 }
+	case .MouseMotion:
+		m := &input.State.Mouse
+		v := m.Delta.X*binding.MotionAxis[0] + m.Delta.Y*binding.MotionAxis[1]
+		v *= f32(binding.Sign)
+		if binding.Max > binding.Min { v = Clamp(v, binding.Min, binding.Max) }
+		result.Value = Clamp(v, f32(0), f32(1))
+		result.Down = result.Value > 0
+		result.Pressed = result.Down
+		result.Timestamp = MotionTimestamp(m)
+	}
+	return result
+}
+
+// ===== merged from Input/Bindings/BindingAxisOverlap.odin =====
+
+
+BindingAxisOverlap :: enum { TakeNewer, TakeOlder, CancelOut }
+
+BindingAxisOverlapResolve :: proc(overlap: BindingAxisOverlap, negative, positive: BindingState) -> f32 {
+    if overlap == .CancelOut do return Clamp(positive.Value - negative.Value, -1, 1)
+    if positive.Down && negative.Down {
+        if overlap == .TakeNewer { if negative.Timestamp > positive.Timestamp do return -negative.Value; return positive.Value }
+        if negative.Timestamp < positive.Timestamp do return -negative.Value; return positive.Value
+    }
+    if positive.Down do return positive.Value
+    if negative.Down do return -negative.Value
+    return 0
+}
+
+// ===== merged from Input/Bindings/BindingState.odin =====
+
+
+BindingState :: struct { Pressed, Released, Down: bool, Value: f32, Timestamp: time.Duration }
+
+// ===== merged from Input/Bindings/ControllerAxisBinding.odin =====
+
+
+ControllerAxisBinding :: struct { Axis: Axes, Sign: int, Deadzone: f32 }
+ControllerAxisBindingMake :: proc(axis: Axes, sign: int, deadzone: f32) -> ControllerAxisBinding { return ControllerAxisBinding{axis, sign, deadzone} }
+
+// ===== merged from Input/Bindings/ControllerButtonBinding.odin =====
+
+
+ControllerButtonBinding :: struct { Button: Buttons }
+ControllerButtonBindingMake :: proc(button: Buttons) -> ControllerButtonBinding { return ControllerButtonBinding{button} }
+
+// ===== merged from Input/Bindings/KeyboardKeyBinding.odin =====
+
+
+KeyboardKeyBinding :: struct { Key: Keys }
+KeyboardKeyBindingMake :: proc(key: Keys) -> KeyboardKeyBinding { return KeyboardKeyBinding{key} }
+KeyboardKeyBindingDescriptor :: proc(binding: KeyboardKeyBinding) -> string { return "Keyboard Key" }
+
+// ===== merged from Input/Bindings/MouseButtonBinding.odin =====
+
+
+MouseButtonBinding :: struct { Button: MouseButtons }
+MouseButtonBindingMake :: proc(button: MouseButtons) -> MouseButtonBinding { return MouseButtonBinding{button} }
+
+// ===== merged from Input/Bindings/MouseMotionBinding.odin =====
+
+MouseMotionBinding :: struct { Axis: [2]f32, Sign: int, Min, Max: f32 }
+MouseMotionBindingMake :: proc(axis: [2]f32, sign: int, min_value, max_value: f32) -> MouseMotionBinding { return MouseMotionBinding{axis, sign, min_value, max_value} }
+
+// ===== merged from Input/Sets/ActionBindingSet.odin =====
+
+
+ActionEntry :: struct { Binding: Binding, Masks: [dynamic]string }
+ActionBindingSet :: struct { Entries: [dynamic]ActionEntry }
+ActionBindingSetMake :: proc() -> ActionBindingSet { return ActionBindingSet{} }
+ActionBindingSetAdd :: proc(set: ^ActionBindingSet, binding: Binding, masks: ..string) {
+	e := ActionEntry{Binding=binding}; for m in masks { append(&e.Masks, m) }; append(&set.Entries, e)
+}
+ActionBindingSetAddKey :: proc(set: ^ActionBindingSet, key: Keys, masks: ..string) { ActionBindingSetAdd(set, Binding{Kind=.KeyboardKey, Key=key}, ..masks[:]) }
+ActionBindingSetAddButton :: proc(set: ^ActionBindingSet, button: Buttons, masks: ..string) { ActionBindingSetAdd(set, Binding{Kind=.ControllerButton, Button=button}, ..masks[:]) }
+ActionBindingSetAddMouseButton :: proc(set: ^ActionBindingSet, button: MouseButtons, masks: ..string) { ActionBindingSetAdd(set, Binding{Kind=.MouseButton, MouseButton=button}, ..masks[:]) }
+ActionBindingSetAddAxis :: proc(set: ^ActionBindingSet, axis: Axes, sign: int, deadzone := f32(0), masks: ..string) { ActionBindingSetAdd(set, Binding{Kind=.ControllerAxis, Axis=axis, Sign=sign, Deadzone=deadzone}, ..masks[:]) }
+ActionBindingSetGetState :: proc(set: ^ActionBindingSet, input: ^Input, device: int) -> BindingState {
+	r := BindingState{}
+	for e in set.Entries { s := BindingGetState(e.Binding, input, device); r.Pressed |= s.Pressed; r.Released |= s.Released; r.Down |= s.Down; if s.Value > r.Value { r.Value = s.Value }; if s.Timestamp > r.Timestamp { r.Timestamp = s.Timestamp } }
+	return r
+}
+ActionBindingSetClear :: proc(set: ^ActionBindingSet) { clear(&set.Entries) }
+ActionBindingSet_ActionEntry :: ActionEntry
+
+
+// ===== merged from Input/Sets/AxisBindingSet.odin =====
+
+
+AxisEntry :: struct { Negative, Positive: Binding, Overlap: BindingAxisOverlap, Masks: [dynamic]string }
+AxisBindingSet :: struct { Entries: [dynamic]AxisEntry }
+AxisBindingSetAdd :: proc(set: ^AxisBindingSet, negative, positive: Binding, overlap := BindingAxisOverlap.TakeNewer, masks: ..string) {
+	e := AxisEntry{Negative=negative, Positive=positive, Overlap=overlap}; for m in masks { append(&e.Masks, m) }; append(&set.Entries, e)
+}
+AxisBindingSetAddKeys :: proc(set: ^AxisBindingSet, negative, positive: Keys, overlap := BindingAxisOverlap.TakeNewer, masks: ..string) { AxisBindingSetAdd(set, Binding{Kind=.KeyboardKey, Key=negative}, Binding{Kind=.KeyboardKey, Key=positive}, overlap, ..masks[:]) }
+AxisBindingSetAddButtons :: proc(set: ^AxisBindingSet, negative, positive: Buttons, overlap := BindingAxisOverlap.TakeNewer, masks: ..string) { AxisBindingSetAdd(set, Binding{Kind=.ControllerButton, Button=negative}, Binding{Kind=.ControllerButton, Button=positive}, overlap, ..masks[:]) }
+AxisBindingSetAddAxis :: proc(set: ^AxisBindingSet, axis: Axes, overlap := BindingAxisOverlap.TakeNewer, masks: ..string) { AxisBindingSetAdd(set, Binding{Kind=.ControllerAxis, Axis=axis, Sign=-1}, Binding{Kind=.ControllerAxis, Axis=axis, Sign=1}, overlap, ..masks[:]) }
+AxisBindingSetValue :: proc(set: ^AxisBindingSet, input: ^Input, device: int) -> f32 {
+	value: f32 = 0
+	for e in set.Entries { n := BindingGetState(e.Negative, input, device); p := BindingGetState(e.Positive, input, device); v := BindingAxisOverlapResolve(e.Overlap, n, p); if math.abs(v) > math.abs(value) { value = v } }
+	return value
+}
+AxisBindingSetPressedSign :: proc(set: ^AxisBindingSet, input: ^Input, device: int) -> int { return int(math.sign(AxisBindingSetValue(set, input, device))) }
+AxisBindingSetClear :: proc(set: ^AxisBindingSet) { clear(&set.Entries) }
+AxisBindingSet_AxisEntry :: AxisEntry
+
+
+// ===== merged from Input/Sets/StickBindingSet.odin =====
+
+
+StickEntry :: struct { Left, Right, Up, Down: Binding, CircularDeadzone: f32, Overlap: BindingAxisOverlap, Masks: [dynamic]string }
+StickBindingSet :: struct { Entries: [dynamic]StickEntry }
+StickBindingSetAdd :: proc(set: ^StickBindingSet, left, right, up, down: Binding, deadzone := f32(0), overlap := BindingAxisOverlap.TakeNewer, masks: ..string) {
+	e := StickEntry{Left=left, Right=right, Up=up, Down=down, CircularDeadzone=deadzone, Overlap=overlap}; for m in masks { append(&e.Masks, m) }; append(&set.Entries, e)
+}
+StickBindingSetAddKeys :: proc(set: ^StickBindingSet, left, right, up, down: Keys, overlap := BindingAxisOverlap.TakeNewer, masks: ..string) { StickBindingSetAdd(set, Binding{Kind=.KeyboardKey, Key=left}, Binding{Kind=.KeyboardKey, Key=right}, Binding{Kind=.KeyboardKey, Key=up}, Binding{Kind=.KeyboardKey, Key=down}, 0, overlap, ..masks[:]) }
+StickBindingSetAddButtons :: proc(set: ^StickBindingSet, left, right, up, down: Buttons, overlap := BindingAxisOverlap.TakeNewer, masks: ..string) { StickBindingSetAdd(set, Binding{Kind=.ControllerButton, Button=left}, Binding{Kind=.ControllerButton, Button=right}, Binding{Kind=.ControllerButton, Button=up}, Binding{Kind=.ControllerButton, Button=down}, 0, overlap, ..masks[:]) }
+StickBindingSetAddAxes :: proc(set: ^StickBindingSet, x, y: Axes, deadzone: f32, overlap := BindingAxisOverlap.TakeNewer, masks: ..string) { StickBindingSetAdd(set, Binding{Kind=.ControllerAxis, Axis=x, Sign=-1}, Binding{Kind=.ControllerAxis, Axis=x, Sign=1}, Binding{Kind=.ControllerAxis, Axis=y, Sign=-1}, Binding{Kind=.ControllerAxis, Axis=y, Sign=1}, deadzone, overlap, ..masks[:]) }
+StickBindingSetValue :: proc(set: ^StickBindingSet, input: ^Input, device: int) -> [2]f32 {
+	value: [2]f32 = {}
+	for e in set.Entries { l := BindingGetState(e.Left,input,device); r := BindingGetState(e.Right,input,device); u := BindingGetState(e.Up,input,device); d := BindingGetState(e.Down,input,device); next := [2]f32{BindingAxisOverlapResolve(e.Overlap,l,r), BindingAxisOverlapResolve(e.Overlap,u,d)}; if e.CircularDeadzone > 0 && next[0]*next[0]+next[1]*next[1] < e.CircularDeadzone*e.CircularDeadzone { continue }; if next[0]*next[0]+next[1]*next[1] > value[0]*value[0]+value[1]*value[1] { value = next } }
+	return value
+}
+StickBindingSetClear :: proc(set: ^StickBindingSet) { clear(&set.Entries) }
+StickBindingSet_StickEntry :: StickEntry
+
+// ===== input_virtual =====
+VirtualInput :: struct {
+	Input: ^Input,
+	Name: string,
+	ControllerIndex: int,
+	Active: bool,
+	IsDisposed: bool,
+}
+
+VirtualInputMake :: proc(input: ^Input, name: string, controller_index := 0) -> VirtualInput {
+	return VirtualInput{Input=input, Name=name, ControllerIndex=controller_index, Active=true}
+}
+VirtualInputDispose :: proc(v: ^VirtualInput) { v.IsDisposed = true }
+VirtualInputSetControllerIndex :: proc(v: ^VirtualInput, index: int) { if index >= 0 { v.ControllerIndex = index } }
+VirtualInputSetActive :: proc(v: ^VirtualInput, active: bool) { if v != nil { v.Active = active } }
+VirtualInputIsActive :: proc(v: ^VirtualInput) -> bool { return v != nil && v.Active && !v.IsDisposed }
+
+// ===== merged from Input/Virtual/VirtualDevice.odin =====
+
+
+VirtualDeviceIndexMode :: enum { Manual, AutomaticLatest }
+VirtualDevice :: struct {
+	Base: VirtualInput,
+	IndexMode: VirtualDeviceIndexMode,
+	Inputs: [dynamic]^VirtualInput,
+	actions: [dynamic]^VirtualAction,
+	axes: [dynamic]^VirtualAxis,
+	sticks: [dynamic]^VirtualStick,
+}
+VirtualDeviceMake :: proc(input: ^Input, name: string, controller_index := 0) -> VirtualDevice { return VirtualDevice{Base=VirtualInputMake(input,name,controller_index),IndexMode=.Manual} }
+VirtualDeviceSetControllerIndex :: proc(v: ^VirtualDevice, index: int) { if v.IndexMode == .Manual { v.Base.ControllerIndex=index; for p in v.Inputs { p.ControllerIndex=index } } }
+VirtualDeviceAddAction :: proc(v: ^VirtualDevice, name: string, set := ActionBindingSet{}, buffer := f32(0)) -> ^VirtualAction { a := new(VirtualAction); a^=VirtualActionMake(v.Base.Input,name,set,v.Base.ControllerIndex,buffer); append(&v.actions,a); append(&v.Inputs,&a.Base); return a }
+VirtualDeviceAddAxis :: proc(v: ^VirtualDevice, name: string, set := AxisBindingSet{}) -> ^VirtualAxis { a := new(VirtualAxis); a^=VirtualAxisMake(v.Base.Input,name,set,v.Base.ControllerIndex); append(&v.axes,a); append(&v.Inputs,&a.Base); return a }
+VirtualDeviceAddStick :: proc(v: ^VirtualDevice, name: string, set := StickBindingSet{}) -> ^VirtualStick { s := new(VirtualStick); s^=VirtualStickMake(v.Base.Input,name,set,v.Base.ControllerIndex); append(&v.sticks,s); append(&v.Inputs,&s.Base); return s }
+VirtualDeviceUpdate :: proc(v: ^VirtualDevice, t: Time) {
+	if v.IndexMode == .AutomaticLatest && v.Base.Input != nil { latest:=0; for i in 1..<InputMaxControllers { if v.Base.Input.State.Controllers[i].IsGamepad && v.Base.Input.State.Controllers[i].InputTimestamp > v.Base.Input.State.Controllers[latest].InputTimestamp { latest=i } }; v.Base.ControllerIndex=latest; for p in v.Inputs { p.ControllerIndex=latest } }
+	for a in v.actions { VirtualActionUpdate(a,t) }; for a in v.axes { VirtualAxisUpdate(a,t) }; for s in v.sticks { VirtualStickUpdate(s,t) }
+}
+VirtualDeviceDispose :: proc(v: ^VirtualDevice) { if v.Base.IsDisposed { return }; for p in v.Inputs { VirtualInputDispose(p) }; clear(&v.Inputs); clear(&v.actions); clear(&v.axes); clear(&v.sticks); v.Base.IsDisposed=true }
+VirtualDeviceIsGamepadLatest :: proc(v: ^VirtualDevice) -> bool { if v.Base.Input == nil || v.Base.ControllerIndex < 0 || v.Base.ControllerIndex >= InputMaxControllers { return false }; c:=&v.Base.Input.State.Controllers[v.Base.ControllerIndex]; return c.IsGamepad && c.InputTimestamp > v.Base.Input.State.Keyboard.InputTimestamp }
+
+// ===== merged from Input/Virtual/VirtualAction.odin =====
+
+
+VirtualAction :: struct {
+	Base: VirtualInput,
+	Set: ActionBindingSet,
+	RepeatDelay: f32,
+	RepeatInterval: f32,
+	Buffer: f32,
+	Pressed, PressConsumed, Down, Released, Repeated: bool,
+	Value, ValueNoDeadzone: f32,
+	Timestamp: time.Duration,
+}
+
+VirtualActionMake :: proc(input: ^Input, name: string, set := ActionBindingSet{}, controller_index := 0, buffer := f32(0)) -> VirtualAction {
+	return VirtualAction{Base=VirtualInputMake(input,name,controller_index), Set=set, RepeatDelay=RepeatDelay, RepeatInterval=RepeatInterval, Buffer=buffer}
+}
+VirtualActionUpdate :: proc(v: ^VirtualAction, t: Time) {
+	if v.Base.IsDisposed || !v.Base.Active || v.Base.Input == nil { return }
+	s := ActionBindingSetGetState(&v.Set, v.Base.Input, v.Base.ControllerIndex)
+	v.Pressed, v.Released, v.Down, v.Value = s.Pressed, s.Released, s.Down, s.Value
+	v.ValueNoDeadzone = s.Value
+	v.Repeated = false
+	if v.Pressed { v.PressConsumed = false; v.Timestamp = t.Elapsed } else if !v.PressConsumed && v.Timestamp > 0 && time.duration_seconds(t.Elapsed-v.Timestamp) < f64(v.Buffer) { v.Pressed = true }
+	if v.Down && time.duration_seconds(t.Elapsed-v.Timestamp) > f64(v.RepeatDelay) && v.RepeatInterval > 0 {
+		elapsed := time.duration_seconds(t.Elapsed-v.Timestamp) - f64(v.RepeatDelay)
+		previous := elapsed - f64(t.Delta)
+		v.Repeated = int(previous/f64(v.RepeatInterval)) < int(elapsed/f64(v.RepeatInterval))
+	}
+}
+VirtualActionManualUpdate :: proc(v: ^VirtualAction, t: Time) { VirtualActionUpdate(v, t) }
+VirtualActionConsumePress :: proc(v: ^VirtualAction) -> bool { if v.Pressed { v.Pressed=false; v.PressConsumed=true; return true }; return false }
+VirtualActionClear :: proc(v: ^VirtualAction) { v.Pressed=false; v.Released=false; v.PressConsumed=true; v.Down=false; v.Repeated=false; v.Value=0; v.ValueNoDeadzone=0 }
+VirtualActionSetControllerIndex :: proc(v: ^VirtualAction, index: int) { VirtualInputSetControllerIndex(&v.Base,index) }
+
+// ===== merged from Input/Virtual/VirtualAxis.odin =====
+
+
+VirtualAxis :: struct { Base: VirtualInput, Set: AxisBindingSet, Value: f32, IntValue: int, PressedSign: int }
+VirtualAxisMake :: proc(input: ^Input, name: string, set := AxisBindingSet{}, controller_index := 0) -> VirtualAxis { return VirtualAxis{Base=VirtualInputMake(input,name,controller_index),Set=set} }
+VirtualAxisUpdate :: proc(v: ^VirtualAxis, t: Time) { _ = t; if v.Base.IsDisposed || !v.Base.Active || v.Base.Input == nil { return }; v.Value=AxisBindingSetValue(&v.Set,v.Base.Input,v.Base.ControllerIndex); if v.Value > 0 { v.IntValue=1 } else if v.Value < 0 { v.IntValue=-1 } else { v.IntValue=0 }; v.PressedSign=AxisBindingSetPressedSign(&v.Set,v.Base.Input,v.Base.ControllerIndex) }
+VirtualAxisManualUpdate :: proc(v: ^VirtualAxis, t: Time) { VirtualAxisUpdate(v, t) }
+VirtualAxisPressed :: proc(v: ^VirtualAxis) -> bool { return v.PressedSign != 0 }
+VirtualAxisPressedNegative :: proc(v: ^VirtualAxis) -> bool { return v.PressedSign < 0 }
+VirtualAxisPressedPositive :: proc(v: ^VirtualAxis) -> bool { return v.PressedSign > 0 }
+VirtualAxisClear :: proc(v: ^VirtualAxis) { v.Value=0; v.IntValue=0; v.PressedSign=0 }
+VirtualAxisSetControllerIndex :: proc(v: ^VirtualAxis,index:int) { VirtualInputSetControllerIndex(&v.Base,index) }
+
+// ===== merged from Input/Virtual/VirtualStick.odin =====
+
+
+VirtualStick :: struct { Base: VirtualInput, Set: StickBindingSet, Value: [2]f32, IntValue: Point2, PressedLeft, PressedRight, PressedUp, PressedDown: bool }
+VirtualStickMake :: proc(input: ^Input, name: string, set := StickBindingSet{}, controller_index := 0) -> VirtualStick { return VirtualStick{Base=VirtualInputMake(input,name,controller_index),Set=set} }
+VirtualStickUpdate :: proc(v: ^VirtualStick, t: Time) { _ = t; if v.Base.IsDisposed || !v.Base.Active || v.Base.Input == nil { return }; v.Value=StickBindingSetValue(&v.Set,v.Base.Input,v.Base.ControllerIndex); v.IntValue=Point2{}; if v.Value[0] < 0 { v.IntValue.X=-1 }; if v.Value[0] > 0 { v.IntValue.X=1 }; if v.Value[1] < 0 { v.IntValue.Y=-1 }; if v.Value[1] > 0 { v.IntValue.Y=1 }; v.PressedLeft=false; v.PressedRight=false; v.PressedUp=false; v.PressedDown=false; for e in v.Set.Entries { l:=BindingGetState(e.Left,v.Base.Input,v.Base.ControllerIndex); r:=BindingGetState(e.Right,v.Base.Input,v.Base.ControllerIndex); u:=BindingGetState(e.Up,v.Base.Input,v.Base.ControllerIndex); d:=BindingGetState(e.Down,v.Base.Input,v.Base.ControllerIndex); v.PressedLeft |= l.Pressed; v.PressedRight |= r.Pressed; v.PressedUp |= u.Pressed; v.PressedDown |= d.Pressed } }
+VirtualStickManualUpdate :: proc(v: ^VirtualStick, t: Time) { VirtualStickUpdate(v, t) }
+VirtualStickClear :: proc(v: ^VirtualStick) { v.Value={}; v.IntValue={}; v.PressedLeft=false; v.PressedRight=false; v.PressedUp=false; v.PressedDown=false }
+VirtualStickSetControllerIndex :: proc(v: ^VirtualStick,index:int) { VirtualInputSetControllerIndex(&v.Base,index) }
+
+// ===== input_provider =====
+InputProvider :: struct { Input: ^Input }
+InputProviderMake :: proc() -> InputProvider { p:=InputProvider{}; p.Input=new(Input); InputInit(p.Input,nil); return p }
+InputProviderUpdate :: proc(p:^InputProvider,t:Time){if p.Input!=nil{InputStep(p.Input,t)}}
+InputProviderText :: proc(p:^InputProvider,text:string){if p.Input!=nil {p.Input.State.Keyboard.Text=text}}
+InputProviderKey :: proc(p:^InputProvider,key:Keys,pressed:bool,stamp:coretime.Duration){if p.Input!=nil{InputKey(p.Input,key,pressed,stamp)}}
+InputProviderMouseButton :: proc(p:^InputProvider,button:MouseButtons,pressed:bool,stamp:coretime.Duration){if p.Input!=nil{InputMouseButton(p.Input,button,pressed,stamp)}}
+InputProviderMouseMove :: proc(p:^InputProvider,position,delta:Vec2f,stamp:coretime.Duration){if p.Input!=nil{InputMouseMove(p.Input,position,delta,stamp)}}
+InputProviderMouseWheel :: proc(p:^InputProvider,wheel:Vec2f){if p.Input!=nil{InputMouseWheel(p.Input,wheel)}}
+InputProviderControllerButton :: proc(p:^InputProvider,id:ControllerID,button:int,pressed:bool,stamp:coretime.Duration){if p.Input!=nil{InputControllerButton(p.Input,id,button,pressed,stamp)}}
+InputProviderControllerAxis :: proc(p:^InputProvider,id:ControllerID,axis:int,value:f32,stamp:coretime.Duration){if p.Input!=nil{InputControllerAxis(p.Input,id,axis,value,stamp)}}
+
+// ===== merged from Input/Cursor.odin =====
+
+
+CursorSystemType :: enum { Default, Text, Wait, Crosshair, Progress, ResizeNWSE, ResizeNESW, ResizeHorizontal, ResizeVertical, Move, NotAllowed, Pointer, ResizeNW, ResizeN, ResizeNE, ResizeE, ResizeSE, ResizeS, ResizeSW, ResizeW }
+Cursor :: struct { FocusPoint: Point2, Size: Point2, SystemType: CursorSystemType, Image: ^Image, Handle: ^SDL.Cursor, Disposed: bool }
+cursor_sdl_system :: proc(kind: CursorSystemType) -> SDL.SystemCursor {
+	return SDL.SystemCursor(kind)
+}
+CursorMakeSystem :: proc(kind: CursorSystemType)->Cursor{return Cursor{SystemType=kind, Handle=SDL.CreateSystemCursor(cursor_sdl_system(kind))}}
+CursorMakeImage :: proc(image:^Image,focus:Point2)->Cursor {
+	result := Cursor{FocusPoint=focus}
+	if image == nil || image.Width <= 0 || image.Height <= 0 || len(image.Pixels) == 0 { return result }
+	result.Size = Point2{image.Width, image.Height}
+	result.Image = image
+	surface := SDL.CreateSurfaceFrom(c.int(image.Width), c.int(image.Height), SDL.PixelFormat.RGBA8888, raw_data(image.Pixels), c.int(image.Width * 4))
+	if surface == nil { return result }
+	result.Handle = SDL.CreateColorCursor(surface, c.int(focus.X), c.int(focus.Y))
+	SDL.DestroySurface(surface)
+	return result
+}
+CursorSet :: proc(c:^Cursor) -> bool { if c == nil || c.Disposed || c.Handle == nil do return false; return SDL.SetCursor(c.Handle) }
+CursorDispose :: proc(c:^Cursor){if c == nil || c.Disposed do return;if c.Handle != nil{SDL.DestroyCursor(c.Handle);c.Handle=nil};c.Disposed=true;c.Image=nil}

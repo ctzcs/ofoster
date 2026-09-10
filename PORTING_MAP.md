@@ -9,7 +9,9 @@
 
 - 上游仓库是 C# 的"一类型一文件 + 命名空间目录"结构；Odin 惯例是单一包内
   按主题分文件。因此 OFoster 不复刻上游目录形状，改用本表承担映射职责。
-- 公共 API 全部在根包 `foster_framework`（`import foster "ofoster:."`）。
+- 公共 API 全部在根包 `foster_framework`（`import foster "ofoster:."`），
+  以少量主题文件组织（`framework`/`foundation`/`graphics`/`images`/`input`/
+  `spatial`/`utility`/`storage`/`web`，外加 `#+build` 平台对与 `web.odin`）。
   仅保留两个内部子包：`Internal/ThirdParty`（vendored C 绑定）与
   `Internal/Web`（js 桥的 JS 侧）。
 - 历史上的 `Graphics/`、`Input/`、`Storage/`、`Spatial/`、`Utility/`、
@@ -21,24 +23,24 @@
 | --- | --- | --- |
 | `Framework/App.cs`、`Framework/Window.cs`、`Framework/Platform*.cs`、主循环 | `framework.odin` | 已移植（App/Window 合于一文件） |
 | `Framework/Time.cs` 等基础数值/颜色/Point2 | `foundation.odin` | 已移植 |
-| `Framework/Graphics/GraphicsDevice.cs` | `graphics_types.odin` + `graphics_draw.odin` + `graphics_resources.odin` | 已移植 |
-| `Framework/Graphics/Texture.cs`、`Target.cs`、`Shader.cs`、`Material.cs`、`Mesh.cs`、`GraphicsBuffer.cs`、`UniformBuffer.cs` | 同上三文件 | 已移植 |
-| `Framework/Graphics/Batcher.cs` | `batcher.odin` | 已移植 |
-| `Framework/Graphics/SpriteFont.cs` | `sprite_font.odin` | 已移植 |
-| `Framework/Graphics/Subtexture.cs` | `subtexture.odin` | 已移植 |
-| 顶点类型 / 类型化初始化辅助（PosTexColVertex、`MeshInitTyped` 等） | `graphics_vertices.odin`、`graphics_vertex_format.odin` | 已移植 |
-| 计算管线 / uniform buffer | `graphics_compute.odin`、`graphics_uniform_buffer.odin` | 已移植 |
-| `Framework/Graphics/Defaults/*` | `graphics_resources.odin`（`DefaultResources*` 一节） | 已移植 |
+| `Framework/Graphics/GraphicsDevice.cs` | `graphics.odin` | 已移植 |
+| `Framework/Graphics/Texture.cs`、`Target.cs`、`Shader.cs`、`Material.cs`、`Mesh.cs`、`GraphicsBuffer.cs`、`UniformBuffer.cs` | `graphics.odin` | 已移植 |
+| `Framework/Graphics/Batcher.cs` | `graphics.odin`（Batcher 一节） | 已移植 |
+| `Framework/Graphics/SpriteFont.cs` | `images.odin` | 已移植 |
+| `Framework/Graphics/Subtexture.cs` | `graphics.odin`（Subtexture 一节） | 已移植 |
+| 顶点类型 / 类型化初始化辅助（PosTexColVertex、`MeshInitTyped` 等） | `graphics.odin` | 已移植 |
+| 计算管线 / uniform buffer | `graphics.odin` | 已移植 |
+| `Framework/Graphics/Defaults/*` | `graphics.odin`（`DefaultResources*` 一节） | 已移植 |
 | `Framework/Input/*`（Input、States、Controller） | `input.odin` | 已移植 |
-| `Framework/Input/Bindings/*`、`BindingSet` | `input_bindings.odin` | 已移植 |
-| `Framework/Input/VirtualInput/*` | `input_virtual.odin` | 已移植 |
-| 光标 / 独立输入供给（工具、测试用） | `input_provider.odin` | 已移植 |
+| `Framework/Input/Bindings/*`、`BindingSet` | `input.odin`（Bindings/Sets 一节） | 已移植 |
+| `Framework/Input/VirtualInput/*` | `input.odin`（Virtual 一节） | 已移植 |
+| 光标 / 独立输入供给（工具、测试用） | `input.odin`（Provider/Cursor 一节） | 已移植 |
 | `Framework/Storage/*` | `storage.odin` + `storage_os_*.odin` + `storage_path_*.odin`（native/web 按 `#+build` 分文件） | 已移植 |
 | Web (js_wasm32) 桥 | `web.odin` + `Internal/Web/foster.js` | 已移植 |
 | 线程 ID 平台差异 | `platform_thread_native.odin` / `platform_thread_web.odin` | 已移植 |
 | `Framework/Spatial/*`（Rect、Circle、Polygon 等） | `spatial.odin` | 已移植（RectInt 以本文件实现为准） |
 | `Framework/Utils/*`（Calc、Ease、Log、Pool、Rng 等） | `utility.odin` | 已移植 |
-| `Framework/Extensions/*` | `extensions.odin` | 已移植 |
+| `Framework/Extensions/*` | `utility.odin`（Extensions 一节） | 已移植 |
 | `Framework/Images/*`（Image、Packer、Aseprite、Font、MsdfFont） | `images.odin` | 已移植 |
 | QOI / stb_truetype 绑定 | `Internal/ThirdParty/`（唯一保留的子包） | vendored |
 

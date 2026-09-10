@@ -71,7 +71,7 @@ vehicles 以 `odin build src -target:js_wasm32 -collection:ofoster=..\OFoster` �
 
 ### Phase 1 非目标（可 stub 或 panic，留 TODO）
 
-- GPU compute（`graphics_compute.odin`；vehicles 未使用——审计确认）
+- GPU compute（`graphics.odin`（compute 一节）；vehicles 未使用——审计确认）
 - `BlitGPUTexture` / `DownloadFromGPUTexture`（vehicles 未使用）
 - Gamepad（`input.odin` 里的 SDL.IsGamepad / AddGamepadMapping 等）
 - 文件对话框（`storage.odin:382-406`）
