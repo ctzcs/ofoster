@@ -60,8 +60,7 @@ web bridge).
   version), `foundation.odin` (math/color basics), `graphics.odin` (the GPU
   layer incl. Batcher), `images.odin` (image loading and fonts), `input.odin`,
   `spatial.odin`, `utility.odin`, `storage.odin`, `web.odin` (js bridge), plus
-  `#+build` platform pairs (`storage_os_*`, `storage_path_*`,
-  `platform_thread_*`).
+  `#+build` platform pair (`platform_native.odin` / `platform_web.odin`).
 - `assets/shaders/`: default shaders embedded at compile time via `#load`.
 - `Internal/`: vendored C bindings (`ThirdParty`) and the web bridge JS (`Web`).
 - `tests/`: `webtest` (web acceptance program) and `graphics_regression`

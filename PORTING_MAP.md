@@ -35,9 +35,9 @@
 | `Framework/Input/Bindings/*`、`BindingSet` | `input.odin`（Bindings/Sets 一节） | 已移植 |
 | `Framework/Input/VirtualInput/*` | `input.odin`（Virtual 一节） | 已移植 |
 | 光标 / 独立输入供给（工具、测试用） | `input.odin`（Provider/Cursor 一节） | 已移植 |
-| `Framework/Storage/*` | `storage.odin` + `storage_os_*.odin` + `storage_path_*.odin`（native/web 按 `#+build` 分文件） | 已移植 |
+| `Framework/Storage/*` | `storage.odin` + `platform_native/web.odin`（OS/路径层按 `#+build` 分侧） | 已移植 |
 | Web (js_wasm32) 桥 | `web.odin` + `Internal/Web/foster.js` | 已移植 |
-| 线程 ID 平台差异 | `platform_thread_native.odin` / `platform_thread_web.odin` | 已移植 |
+| 线程 ID 平台差异 | `platform_native.odin` / `platform_web.odin`（线程 ID 一节） | 已移植 |
 | `Framework/Spatial/*`（Rect、Circle、Polygon 等） | `spatial.odin` | 已移植（RectInt 以本文件实现为准） |
 | `Framework/Utils/*`（Calc、Ease、Log、Pool、Rng 等） | `utility.odin` | 已移植 |
 | `Framework/Extensions/*` | `utility.odin`（Extensions 一节） | 已移植 |

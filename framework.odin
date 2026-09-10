@@ -6,7 +6,7 @@ import "core:mem"
 import coretime "core:time"
 import "core:strings"
 import SDL "vendor:sdl3"
-// core:os 经 platform_thread_native/web.odin 间接使用(js 目标无 core:os)
+// core:os 经 platform_native/web.odin 间接使用(js 目标无 core:os)
 
 // ===== 版本(与上游 Foster 对齐) =====
 

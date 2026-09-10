@@ -2,6 +2,12 @@
 
 package foster_framework
 
+// Web(js_wasm32) 平台实现：storage 的 OS 层/路径层 + 线程 ID。
+// 本机平台对应 platform_native.odin（拆分原因见该文件头注释）。
+
+import slashpath "core:path/slashpath"
+
+// ===== storage OS 层（虚拟 FS 的 JS 桥）（原 storage_os_web.odin） =====
 // 存储层 Web 文件后端(M4): 经 foster_web 桥落到 foster.js 的
 // localStorage 虚拟文件系统(每个文件一个键, base64 载荷, 二进制安全)。
 // 路径为虚拟绝对路径(如 /foster/<app>/settings.txt), 无目录层级 ——
@@ -73,4 +79,28 @@ storage_os_write_file :: proc(path: string, data: []byte) -> bool {
 storage_os_working_directory :: proc(allocator := context.allocator) -> string {
 	_ = allocator
 	return ""
+}
+
+// ===== storage 路径层（斜杠路径语义）（原 storage_path_web.odin） =====
+// 存储层 Web 路径后端: 用 core:path/slashpath 的纯斜杠实现。
+// Web 侧根路径都是虚拟路径("/foster/<app>/"), 斜杠语义正确。
+
+
+storage_path_clean :: proc(path: string, allocator := context.temp_allocator) -> string {
+	return slashpath.clean(path, allocator)
+}
+
+storage_path_join :: proc(parts: []string, allocator := context.temp_allocator) -> string {
+	return slashpath.join(parts, allocator)
+}
+
+storage_path_split :: proc(path: string) -> (dir, file: string) {
+	return slashpath.split(path)
+}
+
+// ===== 线程 ID（wasm 无并发, 恒为主线程）（原 platform_thread_web.odin） =====
+// Web 平台的线程 ID: wasm 无并发(Phase 1 无线程), 恒为主线程
+
+platform_current_thread_id :: proc() -> int {
+	return 1
 }
