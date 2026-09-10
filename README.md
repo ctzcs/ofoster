@@ -50,7 +50,7 @@ primitives, storage helpers, and utility functions. Everything lives in the
 single root package, organized as topic files (`framework.odin`, `input.odin`,
 `spatial.odin`, `storage.odin`, ...). The mapping from upstream Foster's C#
 files to these files, plus intentional API differences, is documented in
-[PORTING_MAP.md](PORTING_MAP.md). The only subpackages are the internal ones:
+[PORTING_MAP.md](docs/PORTING_MAP.md). The only subpackages are the internal ones:
 `Internal/ThirdParty` (vendored C bindings) and `Internal/Web` (JS side of the
 web bridge).
 
@@ -65,6 +65,9 @@ web bridge).
 - `Internal/`: vendored C bindings (`ThirdParty`) and the web bridge JS (`Web`).
 - `tests/`: `webtest` (web acceptance program) and `graphics_regression`
   (GPU regression suite).
+- `docs/`: supplementary documentation — `PORTING_MAP.md` (upstream file
+  mapping and API differences) and `WEB_TARGET_REQUIREMENTS.md` (web target
+  requirements and acceptance notes).
 - `build/`: git-ignored scratch space for local harnesses and artifacts.
 
 ## App usage
