@@ -170,3 +170,55 @@ vehicles 以 `odin build src -target:js_wasm32 -collection:ofoster=..\OFoster` �
 - WebGL2 的 uniform/push-constant 语义与 SDL_GPU 的 PushGPUVertexUniformData 不同（无 push constant），实现时选 UBO 或逐 draw 设 uniform，注意 Batcher 的每帧 uniform 频率。
 - 同步 API（剪贴板）与异步浏览器能力的错配已在 §3 给出策略，勿阻塞主线程。
 - 每帧从 JS 读 wasm 内存构造字符串的开销：日志路径少用字符串桥。
+
+## 12. 导出与发布指南（OFoster 游戏 → 浏览器/itch.io）
+
+以 vehicles 为参考实现（`vehicles/build_web.bat|sh`、`vehicles/run_web.bat|sh`、`vehicles/web/`，另有游戏侧说明 `vehicles/web/README.md`）。
+
+### 12.1 一次性接入（游戏侧，新增游戏时逐项过）
+
+- **平台文件拆分**：游戏里所有 `core:os` / `core:path/filepath` 调用点收口到成对平台文件（`#+build !js` / `#+build js wasm32, js wasm64p32`），参考 `vehicles/src/platform_io_native.odin|_web.odin`。验收手段：`strings xxx.wasm | grep SDL3` 必须为 0，否则 `WebAssembly.instantiate` 直接失败（静态可达即中毒，见 §0 M0）。
+- **存档**：走框架 `OpenUserStorage` 即可，.JS 下自动落到 localStorage 虚拟 FS；不要绕过框架直接 `os.write`。
+- **字体**：浏览器不能读盘 → `when ODIN_OS == .JS` 分支用 `#load` 内嵌字体子集（pyftsubset 从源码字符集生成；vehicles 全量 17.8MB → 486KB）。文案新增字符后需重新生成。
+- **音频**：SDL audio 在 web 不可用 → 游戏自己的 JS 桥接 `FOSTER_EXTRA_IMPORTS` 钩子（foster.js 预留），Odin 侧每帧 pump 一块 PCM（`vehicles/web/vehicles.js` + `src/audio_platform_web.odin`）。
+- **用户数据必须是全局/堆变量**：web 上 App 由框架堆拷贝，`main()` 局部变量会在帧循环期间被栈复用覆写（见 §0 M0）。
+
+### 12.2 构建
+
+```
+odin build src -collection:ofoster=<OFoster路径> -target:js_wasm32 -o:speed -out:build/web/<游戏名>.wasm
+```
+
+产物目录共 5 个文件（资产须全部 `#load` 内嵌进 wasm，不落盘）：
+
+| 文件 | 来源 |
+|---|---|
+| `<游戏名>.wasm` | 上面的构建命令 |
+| `odin.js` | `<odin安装>/core/sys/wasm/js/odin.js`（Odin 官方 wasm 运行时） |
+| `foster.js` | `OFoster/Internal/Web/foster.js`（OFoster 桥） |
+| 游戏桥 `*.js`（可选） | 游戏自己的 JS（如音频桥），经 `FOSTER_EXTRA_IMPORTS` 挂载 |
+| `index.html` | 照抄 `vehicles/web/index.html`：`<canvas id="foster">`、`window.FOSTER_WASM = "<游戏名>.wasm"`、按序引游戏桥 → odin.js → foster.js |
+
+### 12.3 本地运行
+
+**必须走 http，不能 file://**（fetch 拿不到 wasm，CORS 拦截）。一键脚本 `run_web.bat|sh`（起服务+开浏览器+退出自动清理），或手动：
+
+```
+python -m http.server 8138     # 在仓库根目录
+# 打开 http://localhost:8138/build/web/
+```
+
+### 12.4 发布到 itch.io
+
+1. 把 `build/web/` 里**全部文件**打成一个 zip（不要包外层文件夹）。
+2. itch 项目 → Upload new patch → Kind of project 选 **HTML**。
+3. 勾选 **"This file will be played in the browser"**（itch 内嵌 iframe 运行，等同本地 http 服务）。
+
+### 12.5 发布前检查清单
+
+- [ ] `strings <游戏名>.wasm | grep SDL3` 输出为空（无 SDL 导入中毒）。
+- [ ] 桌面构建回归通过（同一份代码双端可跑）。
+- [ ] 改过 `*.js` 后 `index.html` 里对应 `?v=N` 版本号 +1（浏览器脚本缓存，症状是"改动不生效"）。
+- [ ] 音频：首次需一次用户手势（autoplay 策略），确认点击后 BGM 正常。
+- [ ] 已知限制可接受：截图/离屏纹理读回不可用、`FillMode.Line` 恒按填充绘制（见 §0）。
+- [ ] 调试日志默认隐藏；自查时 URL 加 `?debug=1`，出错自动弹出，F12 始终有完整输出。
